@@ -3,6 +3,7 @@
 ## 0. Свой сервис
 Первым делом был написан main.py на Flask (самостоятельно, так как мы УЧЕМСЯ) 
 <img width="100" height="100" alt="image" src="https://github.com/user-attachments/assets/0f83310e-c95d-40ff-8ade-e53e611669e7" />
+
 Все как по ТЗ с тремя эндпоинтами. 
 
 ## 1. Запускаем напрямую
@@ -16,6 +17,12 @@ python main.py #в venv ~/itmo-devops/lab1/.venv/)
 Фиксим PID на хосте:
 <img width="1280" height="200" alt="image" src="https://github.com/user-attachments/assets/34ffc3aa-3935-487d-b1af-0648a3f63aa8" />
 
+_* фан факт для читателей 
+Я жеско не продвинутый юзер гитхаба и только сейчас узнала, что чтобы посмотреть изменения не обязательно комитить каждый раз ридми... есть вот такая кнопка:_
+
+<img width="100" height="20" alt="image" src="https://github.com/user-attachments/assets/23776d1d-708b-4e7f-9fbf-9d1e2d832455" />
+
+_И мне не стыдно._
 
 
 
