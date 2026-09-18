@@ -12,5 +12,10 @@ python main.py #в venv ~/itmo-devops/lab1/.venv/)
 ```
 Открыла в браузере:
 <img width="1280" height="195" alt="image" src="https://github.com/user-attachments/assets/326af6fa-390d-4c1d-aa0d-5f882859b4e8" />
+Все работает я молодец :)
+Фиксим PID на хосте:
+<img width="1280" height="200" alt="image" src="https://github.com/user-attachments/assets/34ffc3aa-3935-487d-b1af-0648a3f63aa8" />
+
+
 
 
