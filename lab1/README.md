@@ -425,4 +425,135 @@ echo 2742844 | sudo tee /sys/fs/cgroup/new-ultimate-innovative-russian-container
     Seccomp_filters:        3
     ```
 
+# Часть 5
+> Собери все команды из частей 2–4 в один скрипт (например, mydocker.sh), который одной командой запускает api в своих namespaces, с cgroup-лимитами и урезанными правами. Проверь, что сервис поднимается и /health отвечает.
+
+В кратце: собрали все команды в один sh скрипт:
+```bash
+#!/bin/bash
+set -uo pipefail
+
+CONTAINER_NAME="new-ultimate-innovative-russian-container-better-than-docker"
+CGROUP_PATH="/sys/fs/cgroup/${CONTAINER_NAME}"
+JAR_PATH="/home/czar/itmo/devops/lab1/api/target/api-1.0.0.jar"
+MEM_LIMIT=104857600
+CPU_QUOTA="50000 100000"
+PIDS_LIMIT=25
+
+sudo mkdir -p "${CGROUP_PATH}"
+echo "${MEM_LIMIT}"  | sudo tee "${CGROUP_PATH}/memory.max"  >/dev/null
+echo "${CPU_QUOTA}"  | sudo tee "${CGROUP_PATH}/cpu.max"     >/dev/null
+echo "${PIDS_LIMIT}" | sudo tee "${CGROUP_PATH}/pids.max"    >/dev/null
+
+sudo systemctl reset-failed "${CONTAINER_NAME}" 2>/dev/null || true
+
+sudo systemd-run --unit="${CONTAINER_NAME}" \
+  -p User=czar \
+  -p SystemCallFilter='~uname' \
+  -p SystemCallErrorNumber=EPERM \
+  -- unshare -Urmpniu --fork --mount-proc sh -c \
+  "ip link set lo up && capsh --drop=cap_sys_time -- -c 'java -jar ${JAR_PATH}'"
+
+PID=""
+for i in $(seq 1 20); do
+  FOUND=$(pgrep -f "^java -jar ${JAR_PATH}$" | head -n1)
+  if [ -n "${FOUND}" ]; then
+    PID="${FOUND}"
+    break
+  fi
+  sleep 0.5
+done
+
+
+echo "${PID}" | sudo tee "${CGROUP_PATH}/cgroup.procs" >/dev/null
+
+echo "Контейнер запущен с PID ${PID}!"
+echo "Юнит: ${CONTAINER_NAME}"
+echo "Cgroup: ${CGROUP_PATH}"
+echo ""
+echo "Для остановки контейнера: sudo systemctl stop ${CONTAINER_NAME}"
+```
+
+Полный скрипт [здесь](mydocker.sh).  
+Из интересного прописали `set -uo pipefail`, чтобы при ошибки какой-то из команд скрипт целиком не падал, но ошибки писал.
+
+> Теперь запусти тот же сервис через docker run и сравни с запуском своего скрипта: что совпадает, чего в твоём скрипте нет и что Docker делает сверх него. Сведи сравнение в README.
+
+Диагностика самописного скрипта:
+```bash
+[czar@svinoserver lab1]$ sudo nsenter -t 4352 -p -m ps -ef
+UID          PID    PPID  C STIME TTY          TIME CMD
+czar           1       0  0 21:09 ?        00:00:00 java -jar /home/czar/itmo/devops/lab1/api/target/api-1.0.0.jar
+root          23       0  0 21:14 pts/1    00:00:00 ps -ef
+
+[czar@svinoserver lab1]$ sudo nsenter -t 4352 -p -m cat /proc/1/status | grep CapEff
+CapEff: 000001fffdffffff
+
+[czar@svinoserver lab1]$ sudo nsenter -t 4352 -p -m cat /proc/1/status | grep Seccomp
+Seccomp:        2
+Seccomp_filters:        3
+
+[czar@svinoserver lab1]$ sudo nsenter -t 4352 -n curl -s http://localhost:8080/health
+ok
+
+[czar@svinoserver lab1]$ cat /sys/fs/cgroup/new-ultimate-innovative-russian-container-better-than-docker/memory.max
+104857600
+
+[czar@svinoserver lab1]$ cat /sys/fs/cgroup/new-ultimate-innovative-russian-container-better-than-docker/cpu.max
+50000 100000
+
+[czar@svinoserver lab1]$ cat /sys/fs/cgroup/new-ultimate-innovative-russian-container-better-than-docker/pids.max
+25
+```
+Все чикибомбони.
+
+Теперь запуск через `docker run`:
+```bash
+docker run -d --name docker-lab \
+  --memory=100m \
+  --cpus=0.5 \
+  --pids-limit=25 \
+  --cap-drop=ALL --cap-add=NET_BIND_SERVICE \
+  -p 8080:8080 \
+  -v /home/czar/itmo/devops/lab1/api/target/api-1.0.0.jar:/app/api.jar:ro \
+  eclipse-temurin:21-jre \
+  java -jar /app/api.jar
+```
+Проверки:
+```bash
+[czar@svinoserver lab1]$ curl localhost:8080/health
+ok
+
+[czar@svinoserver lab1]$ docker inspect docker-lab --format '{{.HostConfig.Memory}} {{.HostConfig.NanoCpus}} {{.HostConfig.PidsLimit}}'
+104857600 500000000 25
+
+[czar@svinoserver lab1]$ docker exec docker-lab cat /proc/1/status | grep -E 'CapEff|Seccomp'
+CapEff: 0000000000000400
+Seccomp:        2
+Seccomp_filters:        1
+
+[czar@svinoserver lab1]$ docker exec docker-lab hostname
+0c585e981a71
+
+[czar@svinoserver lab1]$ docker exec docker-lab ip a
+OCI runtime exec failed: exec failed: unable to start container process: exec: "ip": executable file not found in $PATH
+
+[czar@svinoserver lab1]$ docker exec docker-lab ps -ef
+UID          PID    PPID  C STIME TTY          TIME CMD
+root           1       0  0 20:08 ?        00:00:00 java -jar /app/api.jar
+root          39       0 66 20:09 ?        00:00:00 ps -ef
+```
+
+Выводы:
+
+1. **User namespace**: у нас root внутри — обычный юзер снаружи (`0→1000`). У Docker root внутри — root хоста.
+2. **Capabilities**: дропнули один флаг. Docker дропает всё, потом возвращает, то есть использует whitelist вместо blacklist.
+3. **Seccomp**: скрипт банит один `uname`, Docker банит всё, что не в списке ~300 разрешённых.
+4. **cgroups (память/CPU/pids)**: здесь все идентично.
+
+# Образы
+> Твоему скрипту не хватало готовой файловой системы — её и даёт образ.
+> - Напиши Dockerfile для api и собери образ.
+> - Сделай multi-stage-сборку с минимальной базой (для Go подойдёт scratch или distroless). Сравни размер, число слоёв и что переиспользовалось из кэша при повторной сборке.
+> - Запиши файл внутрь контейнера, пересоздай контейнер — файл пропал. Повтори с томом — файл остался.
 
