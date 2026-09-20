@@ -163,3 +163,21 @@ sudo sh -c 'echo $$ > /sys/fs/cgroup/mygroup/cgroup.procs; exec bash'
 Лимит сработал быстро:
 <img width="1402" height="102" alt="image" src="https://github.com/user-attachments/assets/52512dc0-3783-4b0f-824b-46a68a96e248" />
 ошибку выдало с 5 попытки, что видно на последних двух фото.
+
+## 4. Права
+### 1. Capabilities 
+Capabilities разбивают права root на отдельные флаги.
+Посмотрим на примере изменения даты и времени:
+Через sudo запускаю команду от root. У root есть все capabilities, включая CAP_SYS_TIME. Поэтому время меняется:
+<img width="1373" height="315" alt="image" src="https://github.com/user-attachments/assets/4d9714d8-531f-498a-bedb-c710e1d68630" />
+Root без CAP_SYS_TIME не может менять время, хотя остаётся root.
+### 2. Seccomp 
+изолирует набор системных вызовов, доступных процессу. Заблокированные вызовы ядро не выполняет - процесс получает ошибку.
+Запускаем bash как systemd-юнит с seccomp-фильтром, запрещающим вызов mkdir:
+<img width="1408" height="203" alt="image" src="https://github.com/user-attachments/assets/91b65ae6-acf5-44be-b096-d61b9c3dfbff" />
+Bad system call — ядро прервало процесс.
+Снаружи без фильтра команда работает:
+<img width="1402" height="106" alt="image" src="https://github.com/user-attachments/assets/148bb8d2-282a-4bdb-957f-9f3970f705b2" />
+
+## 5. Собираем Docker
+Создаем mydocker.sh.
