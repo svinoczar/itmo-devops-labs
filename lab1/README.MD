@@ -99,3 +99,7 @@ unshare --user --map-root-user bash
 и видим, что процесс запущен обыкновенным пользователем user.
 Также при попытках изнутри изменить системное время, у нас ничего не получается:
 <img width="1151" height="101" alt="image" src="https://github.com/user-attachments/assets/1919bd76-518a-4022-b444-f239d1974d7f" />
+
+## 3. cgroups
+Смотрим доступные контроллеры:
+
