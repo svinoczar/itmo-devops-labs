@@ -102,4 +102,5 @@ unshare --user --map-root-user bash
 
 ## 3. cgroups
 Смотрим доступные контроллеры:
+<img width="1284" height="72" alt="image" src="https://github.com/user-attachments/assets/45a831b2-ed8e-41b0-8bec-d5e229a5bf0b" />
 
