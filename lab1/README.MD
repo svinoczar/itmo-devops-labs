@@ -183,5 +183,29 @@ Bad system call — ядро прервало процесс.
 Создаем mydocker.sh.
 - В начале скрипта помещаем проверку на root. Это нужно, чтобы работали все необходимые команды. 
 - Прописываем лимиты памяти, CPU, процессов. Проверочка:
-
+<img width="1413" height="205" alt="image" src="https://github.com/user-attachments/assets/5b29d0d4-3401-412e-b2bd-c1e6914883bb" />
+- Прописываем запуск в namespace: свой hostname, IPC, монтирования, сеть, UTS, переход в папку проекта и активацию venv c запуском сервера
+  
+```Python
+    hostname mydocker-container #меняем имя хоста
+    ip link set lo up #поднимаем lo для проверки /health
+    echo $$ > /sys/fs/cgroup/mydocker/cgroup.procs #записываем PID 
+    cd /home/user/itmo-devops/lab1 #переходим в папку проекта
+    source .venv/bin/activate #активируем venv
+    python main.py & #запускаем сервер
+    SERVER_PID=$! #записываем PID фонового процесса
+    trap "kill $SERVER_PID 2>/dev/null; exit" INT TERM #обработчики сигналов
+    sleep 2 #пауза
+    echo "[mydocker] testing /health:" 
+    curl -s http://localhost:5000/health || echo "FAIL" #проверка /health
+    echo "" 
+    echo "[mydocker] server PID (inside): $SERVER_PID" #выводит PID
+    wait $SERVER_PID #ожидает завершения процесса
+```
+Тестим:
+<img width="1372" height="516" alt="image" src="https://github.com/user-attachments/assets/7000eaf4-d65c-4c43-974e-ad4b778f6d36" />
+все успешно запускается, проверка /health дала валидный ответ.
+При проверки виртуальной дериктории видим:
+<img width="1402" height="489" alt="image" src="https://github.com/user-attachments/assets/e0a7f5f6-98cc-4432-a7c9-08ce0367d2a1" />
+что для каждого процесса прописаны уникальные ID в [] скобках.
 
