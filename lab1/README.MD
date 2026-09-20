@@ -228,3 +228,11 @@ docker build -t lab1-api:v1 .
 Смотрим имя хоста:
 <img width="1396" height="84" alt="image" src="https://github.com/user-attachments/assets/af0249d3-8f23-475a-a168-432a466f4554" />
 docker присваивает hostname = ID контейнера, если не задан.
+
+При сборке Dockerfile в отличие от mydocker.sh:
+- Namespaces и Cgroups создаются автоматически
+- своя ФС из образа
+- рабочая сеть с проброшенными портами
+- образ работает не только на твоем компе
+- остановка другой командой (docker stop,  а не Ctrl+C)
+
