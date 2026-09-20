@@ -213,6 +213,7 @@ Namespace процесса сервиса (запущен через mydocker.sh
 - 3 namespace не изолированы (cgroup, time, user): ID **совпадают с хостом**.
 
 ## 5.Dockerfile
+### 1. single-stage
 Прописываем докерфайл для single-stage и запускаем его командой:
 ```Python
 docker build -t lab1-api:v1 .
@@ -236,3 +237,23 @@ docker присваивает hostname = ID контейнера, если не 
 - образ работает не только на твоем компе
 - остановка другой командой (docker stop,  а не Ctrl+C)
 
+### 2. multi-stage
+Проблема single сборки в том, что  в образ попадает всё, что мы делали при сборке: временные установочные файлы, кэш pip и тп. <br><br>
+Поэтому прописываем dockerfile для multi-stage сборки: <br>
+Этап 1 (builder): тяжёлый. Устанавливает зависимости куда-то в отдельную папку. <br>
+Этап 2 (final): лёгкий. Копирует только готовые зависимости из builder'а.
+Сборка успешна:
+<img width="1423" height="850" alt="image" src="https://github.com/user-attachments/assets/f442a2e1-0aa8-40b6-be83-263fb0e61e9f" />
+Запустим контейнер на основе второго образа:
+<img width="1403" height="209" alt="image" src="https://github.com/user-attachments/assets/c4f0be24-1cb9-4e11-b165-931258ccb0bf" />
+видим IDшник, ответ по запросу валидный.
+Сравним размеры от 1 и 2 варианта сборки:
+<img width="1391" height="112" alt="image" src="https://github.com/user-attachments/assets/dd2b91c5-0f4c-4239-baf0-7f7bd3ccc926" />
+multi-stage сборка экономит память.
+Посмотрим слои:
+от 1 сборки
+<img width="1406" height="1193" alt="image" src="https://github.com/user-attachments/assets/ee2a8767-99b4-409d-85ea-6a91f3db1b6b" />
+от 2 сборки
+<img width="1400" height="1121" alt="image" src="https://github.com/user-attachments/assets/b70f39e2-0203-481c-964d-2a8f2c7c8966" />
+v1: слой pip install = 5.3 МБ. В нём — пакеты + кэш pip + метаданные установки.
+v2: слой COPY /install = 0.66 МБ. Только пакеты. Кэш и метаданные остались в builder-этапе — в финальный образ не попали.
