@@ -211,3 +211,20 @@ Namespace процесса сервиса (запущен через mydocker.sh
 <img width="1402" height="489" alt="image" src="https://github.com/user-attachments/assets/e0a7f5f6-98cc-4432-a7c9-08ce0367d2a1" />
 - 5 namespace изолированы (IPC, mount, net, PID, UTS): у сервиса **свои ID**, отличные от хоста.
 - 3 namespace не изолированы (cgroup, time, user): ID **совпадают с хостом**.
+
+## 5.Dockerfile
+Прописываем докерфайл для single-stage и запускаем его командой:
+```Python
+docker build -t lab1-api:v1 .
+```
+Образ успешно создан:
+<img width="1395" height="1093" alt="image" src="https://github.com/user-attachments/assets/bb6d06f9-8127-4ce7-9a5d-344f4b035be3" />
+<img width="1391" height="82" alt="image" src="https://github.com/user-attachments/assets/7b763aee-f2e1-4471-8712-f554f1a1ecda" />
+Запускаем контейнер на основе образа и видим его IDшник:
+<img width="1400" height="108" alt="image" src="https://github.com/user-attachments/assets/5845a7e1-3a23-4cac-b9e6-4c29a5c74925" />
+Сервер рабочий:
+<img width="1398" height="125" alt="image" src="https://github.com/user-attachments/assets/40e73b3d-78b8-404a-b27d-c1eb4db854d1" />
+здесь /health отвечает снаружи (с хоста), так как docker настроил сеть и пробросил порт.
+Смотрим имя хоста:
+<img width="1396" height="84" alt="image" src="https://github.com/user-attachments/assets/af0249d3-8f23-475a-a168-432a466f4554" />
+docker присваивает hostname = ID контейнера, если не задан.
