@@ -205,8 +205,9 @@ Bad system call — ядро прервало процесс.
 Тестим:
 <img width="1372" height="516" alt="image" src="https://github.com/user-attachments/assets/7000eaf4-d65c-4c43-974e-ad4b778f6d36" />
 все успешно запускается, проверка /health дала валидный ответ.
-Смотрим namespace процесса main.py:
+Namespace процесса init (PID 1) на хосте:
+<img width="1371" height="475" alt="image" src="https://github.com/user-attachments/assets/6e4497d4-8dbc-4903-8b1d-87d0e86f89dd" />
+Namespace процесса сервиса (запущен через mydocker.sh):
 <img width="1402" height="489" alt="image" src="https://github.com/user-attachments/assets/e0a7f5f6-98cc-4432-a7c9-08ce0367d2a1" />
-ID в квадратных скобках — уникальные идентификаторы namespace в ядре. 
-
-Сравнивая с /proc/1/ns/ (процесс init), видно: 5 namespace — свои (PID, UTS, IPC, mount, net), 3 — хостовые (cgroup, time, user). Это соответствует флагам unshare --pid --uts --ipc --mount --net в скрипте: только эти 5 создаются, остальные наследуются от хоста.
+- 5 namespace изолированы (IPC, mount, net, PID, UTS): у сервиса **свои ID**, отличные от хоста.
+- 3 namespace не изолированы (cgroup, time, user): ID **совпадают с хостом**.
