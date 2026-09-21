@@ -1,8 +1,5 @@
 package ru.itmo.devops.api;
 
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpServer;
-
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
@@ -12,6 +9,9 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Executors;
+
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
 
 public final class ApiApplication {
     private static final int BYTES_IN_MEGABYTE = 1024 * 1024;
@@ -44,7 +44,7 @@ public final class ApiApplication {
             respond(exchange, 405, "method not allowed\n");
             return;
         }
-        respond(exchange, 200, "ok\n");
+        respond(exchange, 200, "OK\n");
     }
 
     private static void eat(HttpExchange exchange) throws IOException {
