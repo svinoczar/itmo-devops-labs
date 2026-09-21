@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"sync/atomic"
 )
 
 var (
-	memoryHog [][]byte,
+	memoryHog [][]byte
 	isBurning atomic.Bool
 )
-
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, "ok\n")
@@ -30,22 +30,17 @@ func eatHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func burnHandler(w http.ResponseWriter, r *http.Request) {
-	if isBurning.
-	go func() {
-		for {
-			select {
-   				case <-stopChan:
-					return
-				default:
+	if isBurning.Swap(true) {
+		go func() {
+			for isBurning.Load() {
 			}
 		}()
+		fmt.Fprint(w, "Started CPU burn in background goroutine\n")
 	}
-
-	fmt.Fprint(w, "Started CPU burn in background goroutine\n")
 }
 
 func stopBurnHandler(w http.ResponseWriter, r *http.Request) {
-	stopChan<-struct{}{}
+	isBurning.Store(false)
 	fmt.Fprint(w, "CLosed CPU burn\n")
 }
 
