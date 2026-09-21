@@ -276,3 +276,30 @@ multi-stage сборка экономит память.
 <img width="1400" height="1121" alt="image" src="https://github.com/user-attachments/assets/b70f39e2-0203-481c-964d-2a8f2c7c8966" />
 v1: слой pip install = 5.3 МБ. В нём — пакеты + кэш pip + метаданные установки.
 v2: слой COPY /install = 0.66 МБ. Только пакеты. Кэш и метаданные остались в builder-этапе — в финальный образ не попали.
+
+### 3.Volumes 
+Эфемерность контейнера решается томами. Важную инфу кладут отдельно от контейнера, чтобы случайно не удалить ее,  ведь при удалении контейнер забирает в могилу все, что в нем было.
+
+1. Без тома
+  Запускаем контейнер с входом в него (добавляем в конце bash):
+  <img width="1395" height="115" alt="image" src="https://github.com/user-attachments/assets/f1cee998-85dd-4867-9129-272e3bb618e2" />
+  Создаем внутри контейнера файл:
+  <img width="1090" height="105" alt="image" src="https://github.com/user-attachments/assets/901fefc9-3136-4323-b7de-6fea03954608" />
+  Выходим из контейнера и удаляем его.
+  Создаем новый контейнер из того же образа и видим:
+  <img width="1423" height="206" alt="image" src="https://github.com/user-attachments/assets/e6f0fc8a-0914-41e5-8596-aa2dc1d1e34e" />
+  что этого файла больше не существует. При удалении контейнера он был удален вместе с ним.
+
+2. С томом
+    Создаем том:
+  ```Python
+  docker volume create mydata
+  ```
+  И запускаем контейнер с подключением тома:
+  ```Python
+  docker run -it --name vol-with-volume -v mydata:/data lab1-api:v2 bash
+  ```
+  Создаем файл, но уже не в директории контейнера, а в томе:
+  <img width="1138" height="268" alt="image" src="https://github.com/user-attachments/assets/ffcfd3d2-a584-4673-b060-1855e080b97d" />
+  Выходим, удаляем, создаем, заходим и видим, что файл на месте:
+  <img width="1395" height="378" alt="image" src="https://github.com/user-attachments/assets/a2413777-6951-4eb1-b140-eba6959a3b58" />
