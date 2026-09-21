@@ -557,3 +557,558 @@ root          39       0 66 20:09 ?        00:00:00 ps -ef
 > - Сделай multi-stage-сборку с минимальной базой (для Go подойдёт scratch или distroless). Сравни размер, число слоёв и что переиспользовалось из кэша при повторной сборке.
 > - Запиши файл внутрь контейнера, пересоздай контейнер — файл пропал. Повтори с томом — файл остался.
 
+Напишем простой докерфайл:
+```Dockerfile
+FROM eclipse-temurin:21-jdk
+WORKDIR /app
+COPY . .
+RUN mvn -B package -DskipTests
+CMD ["java", "-jar", "target/api-1.0.0.jar"]
+```
+Соберем контейнер:
+```bash
+[czar@svinoserver api]$ docker build -t api -f Dockerfile .
+
+Sending build context to Docker daemon  36.35kB
+Step 1/5 : FROM maven:3.9-eclipse-temurin-21
+3.9-eclipse-temurin-21: Pulling from library/maven
+91f9926a0587: Pulling fs layer
+edd1ed89f0d4: Pulling fs layer
+a0f1cfdec651: Pulling fs layer
+81a217830566: Pulling fs layer
+e5d77f4fb216: Pulling fs layer
+abd660e00db2: Pulling fs layer
+1e47edd31b66: Pulling fs layer
+2140a5e2ab92: Pulling fs layer
+6e8eb09ed21b: Pulling fs layer
+bb0eae36b0e8: Download complete
+abd660e00db2: Download complete
+a0f1cfdec651: Download complete
+cce25323767b: Download complete
+6e8eb09ed21b: Download complete
+2140a5e2ab92: Download complete
+81a217830566: Download complete
+1e47edd31b66: Download complete
+e5d77f4fb216: Download complete
+edd1ed89f0d4: Download complete
+edd1ed89f0d4: Pull complete
+1e47edd31b66: Pull complete
+91f9926a0587: Download complete
+91f9926a0587: Pull complete
+abd660e00db2: Pull complete
+6e8eb09ed21b: Pull complete
+e5d77f4fb216: Pull complete
+81a217830566: Pull complete
+a0f1cfdec651: Pull complete
+2140a5e2ab92: Pull complete
+Digest: sha256:c2a2c58516d160f43b50f12baa427ca86989e0bc942609e04aff61da5d9a7d74
+Status: Downloaded newer image for maven:3.9-eclipse-temurin-21
+ ---> c2a2c58516d1
+Step 2/5 : WORKDIR /app
+ ---> Running in 8df11e54bc1c
+ ---> Removed intermediate container 8df11e54bc1c
+ ---> 811c82182e65
+Step 3/5 : COPY . .
+ ---> 2fc390873df4
+Step 4/5 : RUN mvn -B package -DskipTests
+ ---> Running in a549265b6163
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -------------------------< ru.itmo.devops:api >-------------------------
+[INFO] Building api 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] Downloading from central: https://repo.maven.apache.org/maven2/org/apache/maven/plugins/maven-resources-plugin/3.4.0/maven-resources-plugin-3.4.0.pom
+...
+[INFO] Building jar: /app/target/api-1.0.0.jar
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  15.573 s
+[INFO] Finished at: 2026-09-21T12:12:52Z
+[INFO] ------------------------------------------------------------------------
+ ---> Removed intermediate container a549265b6163
+ ---> 067f35dc12e9
+Step 5/5 : CMD ["java", "-jar", "target/api-1.0.0.jar"]
+ ---> Running in c4c4c975dcf3
+ ---> Removed intermediate container c4c4c975dcf3
+ ---> 31e18f796c8c
+Successfully built 31e18f796c8c
+Successfully tagged api:latest
+```
+
+Теперь напишем и соберем multi-staged докерфайл.  
+Dockerfile.multistaged:
+```dockerfile
+FROM maven:3.9-eclipse-temurin-21 AS build
+WORKDIR /src
+COPY pom.xml .
+RUN mvn -B dependency:go-offline
+COPY src ./src
+RUN mvn -B package -DskipTests
+
+FROM gcr.io/distroless/java21-debian12
+WORKDIR /app
+COPY --from=build /src/target/api-1.0.0.jar /app/api.jar
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "/app/api.jar"]
+```
+Сборка:
+```bash
+[INFO] Downloaded from central: https://repo.maven.apache.org/maven2/org/codehaus/plexus/plexus-java/1.2.0/plexus-java-1.2.0.jar (58 kB at 518 kB/s)
+...
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  48.256 s
+[INFO] Finished at: 2026-09-21T12:16:01Z
+[INFO] ------------------------------------------------------------------------
+ ---> Removed intermediate container c71c6f6e1d1a
+ ---> ac6ac629c1ae
+Step 5/11 : COPY src ./src
+ ---> 31e3da5ba480
+Step 6/11 : RUN mvn -B package -DskipTests
+ ---> Running in e70a48e214c6
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -------------------------< ru.itmo.devops:api >-------------------------
+[INFO] Building api 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ api ---
+[INFO] skip non existing resourceDirectory /src/src/main/resources
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ api ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 1 source file with javac [debug release 21] to target/classes
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ api ---
+[INFO] skip non existing resourceDirectory /src/src/test/resources
+[INFO] 
+[INFO] --- compiler:3.13.0:testCompile (default-testCompile) @ api ---
+[INFO] No sources to compile
+[INFO] 
+[INFO] --- surefire:3.5.4:test (default-test) @ api ---
+[INFO] Tests are skipped.
+[INFO] 
+[INFO] --- jar:3.4.2:jar (default-jar) @ api ---
+[INFO] Building jar: /src/target/api-1.0.0.jar
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  1.205 s
+[INFO] Finished at: 2026-09-21T12:16:07Z
+[INFO] ------------------------------------------------------------------------
+ ---> Removed intermediate container e70a48e214c6
+ ---> 102ffbb53ab2
+Step 7/11 : FROM gcr.io/distroless/java21-debian12
+latest: Pulling from distroless/java21-debian12
+3214acf345c0: Pulling fs layer
+ef49c20a7b35: Pulling fs layer
+dd64bf2dd177: Pulling fs layer
+52630fc75a18: Pulling fs layer
+dcaa5a89b0cc: Pulling fs layer
+7c12895b777b: Pulling fs layer
+250755fb415d: Pulling fs layer
+66da007fd54f: Pulling fs layer
+b839dfae01f6: Pulling fs layer
+526604835308: Pulling fs layer
+b16bb3b2bd07: Pulling fs layer
+bf7a4185f015: Pulling fs layer
+990a9c434e5e: Pulling fs layer
+069d1e267530: Pulling fs layer
+1fd3329b0de2: Pulling fs layer
+c65bb0c25578: Pulling fs layer
+8928cb22aa37: Pulling fs layer
+08dd3c4351e9: Pulling fs layer
+4486a6a259bb: Pulling fs layer
+ba6750202c26: Pulling fs layer
+ef335559898d: Pulling fs layer
+6d7292fc835d: Pulling fs layer
+d38b7f3e8045: Pulling fs layer
+ace43640e860: Pulling fs layer
+5822fa015fc5: Pulling fs layer
+2780920e5dbf: Pulling fs layer
+3a212aea01d1: Pulling fs layer
+f164bc9f2b9e: Pulling fs layer
+1e8acdaa2607: Pulling fs layer
+a812c900745e: Pulling fs layer
+52630fc75a18: Download complete
+7c12895b777b: Download complete
+66da007fd54f: Download complete
+2780920e5dbf: Download complete
+3214acf345c0: Download complete
+dd64bf2dd177: Download complete
+b839dfae01f6: Download complete
+dcaa5a89b0cc: Download complete
+526604835308: Download complete
+526604835308: Pull complete
+d38b7f3e8045: Download complete
+4486a6a259bb: Download complete
+990a9c434e5e: Download complete
+ba6750202c26: Download complete
+990a9c434e5e: Pull complete
+6d7292fc835d: Download complete
+b16bb3b2bd07: Download complete
+bf7a4185f015: Download complete
+08dd3c4351e9: Download complete
+5822fa015fc5: Download complete
+250755fb415d: Download complete
+8928cb22aa37: Download complete
+a812c900745e: Download complete
+069d1e267530: Download complete
+3a212aea01d1: Download complete
+1e8acdaa2607: Download complete
+f164bc9f2b9e: Download complete
+ef49c20a7b35: Download complete
+ef49c20a7b35: Pull complete
+bf7a4185f015: Pull complete
+7c12895b777b: Pull complete
+2780920e5dbf: Pull complete
+ace43640e860: Download complete
+52630fc75a18: Pull complete
+3214acf345c0: Pull complete
+dd64bf2dd177: Pull complete
+b839dfae01f6: Pull complete
+dcaa5a89b0cc: Pull complete
+069d1e267530: Pull complete
+c65bb0c25578: Download complete
+ef335559898d: Download complete
+c65bb0c25578: Pull complete
+250755fb415d: Pull complete
+4486a6a259bb: Pull complete
+ba6750202c26: Pull complete
+8928cb22aa37: Pull complete
+ef335559898d: Pull complete
+d38b7f3e8045: Pull complete
+6d7292fc835d: Pull complete
+ace43640e860: Pull complete
+5822fa015fc5: Pull complete
+3a212aea01d1: Pull complete
+f164bc9f2b9e: Pull complete
+a812c900745e: Pull complete
+1e8acdaa2607: Pull complete
+b16bb3b2bd07: Pull complete
+08dd3c4351e9: Pull complete
+66da007fd54f: Pull complete
+1fd3329b0de2: Download complete
+1fd3329b0de2: Pull complete
+Digest: sha256:f34fd3e4e2d7a246d764d0614f5e6ffb3a735930723fac4cfc25a72798950262
+Status: Downloaded newer image for gcr.io/distroless/java21-debian12:latest
+ ---> f34fd3e4e2d7
+Step 8/11 : WORKDIR /app
+ ---> Running in a612f242b6f3
+ ---> Removed intermediate container a612f242b6f3
+ ---> 9b9dbb28099b
+Step 9/11 : COPY --from=build /src/target/api-1.0.0.jar /app/api.jar
+ ---> cecc862fe6c2
+Step 10/11 : EXPOSE 8080
+ ---> Running in 2f4b09bb9bd1
+ ---> Removed intermediate container 2f4b09bb9bd1
+ ---> 6abd60982945
+Step 11/11 : ENTRYPOINT ["java", "-jar", "/app/api.jar"]
+ ---> Running in bcd617f18a0b
+ ---> Removed intermediate container bcd617f18a0b
+ ---> 3aeec311305b
+Successfully built 3aeec311305b
+Successfully tagged api-multistage:latest
+```
+Теперь сравни *images*:
+```bash
+[czar@svinoserver api]$ docker images api
+                                                                                                                                                                                                                                                                                                       i Info →   U  In Use
+IMAGE        ID             DISK USAGE   CONTENT SIZE   EXTRA
+api:latest   31e18f796c8c        832MB          259MB        
+
+[czar@svinoserver api]$ docker images api-multistage
+                                                                                                                                                                                                                                                                                                       i Info →   U  In Use
+IMAGE                   ID             DISK USAGE   CONTENT SIZE   EXTRA
+api-multistage:latest   3aeec311305b        261MB         63.2MB 
+```
+
+Как видим, image мультистейдж докера занимает почти в 4 раза меньше места на диске. Сравним слои.  
+Обычный образ:
+```bash
+[czar@svinoserver api]$ docker history api:latest
+IMAGE          CREATED         CREATED BY                                      SIZE      COMMENT
+31e18f796c8c   7 minutes ago   /bin/sh -c #(nop)  CMD ["java" "-jar" "targe…   0B        
+067f35dc12e9   7 minutes ago   /bin/sh -c mvn -B package -DskipTests           20.7MB    
+2fc390873df4   7 minutes ago   /bin/sh -c #(nop) COPY dir:71c2c997116807626…   49.2kB    
+811c82182e65   7 minutes ago   /bin/sh -c #(nop) WORKDIR /app                  0B        
+c2a2c58516d1   5 days ago      CMD ["mvn"]                                     0B        buildkit.dockerfile.v0
+<missing>      5 days ago      ENTRYPOINT ["/usr/local/bin/mvn-entrypoint.s…   0B        buildkit.dockerfile.v0
+<missing>      5 days ago      ENV MAVEN_CONFIG=/root/.m2                      0B        buildkit.dockerfile.v0
+<missing>      5 days ago      ARG USER_HOME_DIR=/root                         0B        buildkit.dockerfile.v0
+<missing>      5 days ago      RUN /bin/sh -c ln -s ${MAVEN_HOME}/bin/mvn /…   4.1kB     buildkit.dockerfile.v0
+<missing>      5 days ago      COPY /usr/local/bin/mvn-entrypoint.sh /usr/l…   4.1kB     buildkit.dockerfile.v0
+<missing>      5 days ago      COPY /usr/share/maven /usr/share/maven # bui…   11.1MB    buildkit.dockerfile.v0
+<missing>      5 days ago      ENV MAVEN_HOME=/usr/share/maven                 0B        buildkit.dockerfile.v0
+<missing>      5 days ago      LABEL org.opencontainers.image.description=A…   0B        buildkit.dockerfile.v0
+<missing>      5 days ago      LABEL org.opencontainers.image.url=https://g…   0B        buildkit.dockerfile.v0
+<missing>      5 days ago      LABEL org.opencontainers.image.source=https:…   0B        buildkit.dockerfile.v0
+<missing>      5 days ago      LABEL org.opencontainers.image.title=Apache …   0B        buildkit.dockerfile.v0
+<missing>      5 days ago      RUN /bin/sh -c apt-get update   && apt-get i…   77.2MB    buildkit.dockerfile.v0
+<missing>      5 days ago      CMD ["jshell"]                                  0B        buildkit.dockerfile.v0
+<missing>      5 days ago      ENTRYPOINT ["/__cacert_entrypoint.sh"]          0B        buildkit.dockerfile.v0
+<missing>      5 days ago      COPY --chmod=755 entrypoint.sh /__cacert_ent…   8.19kB    buildkit.dockerfile.v0
+<missing>      5 days ago      RUN /bin/sh -c set -eux;     echo "Verifying…   0B        buildkit.dockerfile.v0
+<missing>      5 days ago      RUN /bin/sh -c set -eux;     ARCH="$(dpkg --…   309MB     buildkit.dockerfile.v0
+<missing>      5 days ago      ENV JAVA_VERSION=jdk-21.0.12+8                  0B        buildkit.dockerfile.v0
+<missing>      5 days ago      RUN /bin/sh -c set -eux;     apt-get update;…   69.3MB    buildkit.dockerfile.v0
+<missing>      5 days ago      ENV LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_AL…   0B        buildkit.dockerfile.v0
+<missing>      5 days ago      ENV PATH=/opt/java/openjdk/bin:/usr/local/sb…   0B        buildkit.dockerfile.v0
+<missing>      5 days ago      ENV JAVA_HOME=/opt/java/openjdk                 0B        buildkit.dockerfile.v0
+<missing>      10 days ago     /bin/sh -c #(nop)  CMD ["/bin/bash"]            0B        
+<missing>      10 days ago     /bin/sh -c #(nop) ADD file:43d479b270bbaf479…   85.7MB    
+<missing>      10 days ago     /bin/sh -c #(nop)  LABEL org.opencontainers.…   0B        
+<missing>      10 days ago     /bin/sh -c #(nop)  ARG LAUNCHPAD_BUILD_ARCH     0B        
+<missing>      10 days ago     /bin/sh -c #(nop)  ARG RELEASE                  0B     
+```
+Мультистейдже:
+```bash
+[czar@svinoserver api]$ docker history api-multistage:latest
+IMAGE          CREATED         CREATED BY                                      SIZE      COMMENT
+3aeec311305b   4 minutes ago   /bin/sh -c #(nop)  ENTRYPOINT ["java" "-jar"…   0B        
+6abd60982945   4 minutes ago   /bin/sh -c #(nop)  EXPOSE 8080                  0B        
+cecc862fe6c2   4 minutes ago   /bin/sh -c #(nop) COPY file:6891f4ab1af8d445…   8.19kB    
+9b9dbb28099b   4 minutes ago   /bin/sh -c #(nop) WORKDIR /app                  0B        
+f34fd3e4e2d7   N/A             bazel build //java:temurin_jre_21_amd64         166MB     
+<missing>      N/A             bazel build //common:locale_debian12_amd64      430kB     
+<missing>      N/A             bazel build @bookworm_java//libpng16-16/amd6…   442kB     
+<missing>      N/A             bazel build @bookworm_java//gcc-12-base/amd6…   106kB     
+<missing>      N/A             bazel build @bookworm_java//libgcc-s1/amd64:…   143kB     
+<missing>      N/A             bazel build @bookworm_java//libstdc++6/amd64…   2.34MB    
+<missing>      N/A             bazel build @bookworm_java//libcrypt1/amd64:…   246kB     
+<missing>      N/A             bazel build @bookworm_java//libbrotli1/amd64…   819kB     
+<missing>      N/A             bazel build @bookworm_java//libuuid1/amd64:d…   86kB      
+<missing>      N/A             bazel build @bookworm_java//libfontconfig1/a…   594kB     
+<missing>      N/A             bazel build @bookworm_java//libexpat1/amd64:…   406kB     
+<missing>      N/A             bazel build @bookworm_java//fontconfig-confi…   643kB     
+<missing>      N/A             bazel build @bookworm_java//fonts-dejavu-cor…   3.12MB    
+<missing>      N/A             bazel build @bookworm_java//libfreetype6/amd…   909kB     
+<missing>      N/A             bazel build @bookworm_java//liblcms2-2/amd64…   434kB     
+<missing>      N/A             bazel build @bookworm_java//libjpeg62-turbo/…   696kB     
+<missing>      N/A             bazel build @bookworm_java//zlib1g/amd64:dat…   176kB     
+<missing>      N/A             bazel build @bookworm//libc6/amd64:data_stat…   13.4MB    
+<missing>      N/A             bazel build //common:cacerts_debian12_amd64     238kB     
+<missing>      N/A             bazel build //common:os_release_debian12        4.1kB     
+<missing>      N/A             bazel build //static:nsswitch                   4.1kB     
+<missing>      N/A             bazel build //common:tmp                        0B        
+<missing>      N/A             bazel build //common:group                      4.1kB     
+<missing>      N/A             bazel build //common:home                       0B        
+<missing>      N/A             bazel build //common:passwd                     4.1kB     
+<missing>      N/A             bazel build //common:rootfs                     0B        
+<missing>      N/A             bazel build @bookworm//media-types/amd64:dat…   102kB     
+<missing>      N/A             bazel build @bookworm//tzdata/amd64:data_sta…   5.51MB    
+<missing>      N/A             bazel build @bookworm//netbase/amd64:data_st…   45.1kB    
+<missing>      N/A             bazel build @bookworm//base-files/amd64:data…   397kB    
+```
+У обычного файла 29 слоев, у multistage 30.  
+У обычного слои apt/JDK/Maven-установки + код апи сверху; у multistage — слои сборки distroless-образа и поверх 4 слоя (WORKDIR, COPY jar, EXPOSE, ENTRYPOINT).
+
+Меняем немного код и повторно собираем multistage.
+```bash
+[czar@svinoserver api]$ docker build -t api-multistage:v2 -f Dockerfile.multistaged .
+
+Sending build context to Docker daemon  36.35kB
+Step 1/11 : FROM maven:3.9-eclipse-temurin-21 AS build
+ ---> c2a2c58516d1
+Step 2/11 : WORKDIR /src
+ ---> Using cache
+ ---> 5a1b16aa00f3
+Step 3/11 : COPY pom.xml .
+ ---> Using cache
+ ---> 99e2215edcf6
+Step 4/11 : RUN mvn -B dependency:go-offline
+ ---> Using cache
+ ---> ac6ac629c1ae
+Step 5/11 : COPY src ./src
+ ---> 0793cae78cc9
+Step 6/11 : RUN mvn -B package -DskipTests
+ ---> Running in 216778dc6a80
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -------------------------< ru.itmo.devops:api >-------------------------
+[INFO] Building api 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ api ---
+[INFO] skip non existing resourceDirectory /src/src/main/resources
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ api ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 1 source file with javac [debug release 21] to target/classes
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ api ---
+[INFO] skip non existing resourceDirectory /src/src/test/resources
+[INFO] 
+[INFO] --- compiler:3.13.0:testCompile (default-testCompile) @ api ---
+[INFO] No sources to compile
+[INFO] 
+[INFO] --- surefire:3.5.4:test (default-test) @ api ---
+[INFO] Tests are skipped.
+[INFO] 
+[INFO] --- jar:3.4.2:jar (default-jar) @ api ---
+[INFO] Building jar: /src/target/api-1.0.0.jar
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  1.137 s
+[INFO] Finished at: 2026-09-21T12:26:47Z
+[INFO] ------------------------------------------------------------------------
+ ---> Removed intermediate container 216778dc6a80
+ ---> 206ebc730680
+Step 7/11 : FROM gcr.io/distroless/java21-debian12
+ ---> f34fd3e4e2d7
+Step 8/11 : WORKDIR /app
+ ---> Using cache
+ ---> 9b9dbb28099b
+Step 9/11 : COPY --from=build /src/target/api-1.0.0.jar /app/api.jar
+ ---> a72207dd3cde
+Step 10/11 : EXPOSE 8080
+ ---> Running in 3d8d96ec6156
+ ---> Removed intermediate container 3d8d96ec6156
+ ---> 91866bcda789
+Step 11/11 : ENTRYPOINT ["java", "-jar", "/app/api.jar"]
+ ---> Running in 5794a82f02f3
+ ---> Removed intermediate container 5794a82f02f3
+ ---> 1bb055fef420
+Successfully built 1bb055fef420
+Successfully tagged api-multistage:v2
+```
+**Кэширование при повторной сборке:**  
+После изменения кода, слои `pom.xml` и `dependency:go-offline` остались закэшированными (`pom.xml` не менялся). Кэш инвалидировался начиная с `COPY src ./src`.
+Компиляция заняла буквально секунду, так как зависимости
+уже были на диске => изменение кода не приводит к повторному скачиванию зависимостей.
+
+Теперь проверим последний пункт `Запиши файл внутрь контейнера, пересоздай контейнер — файл пропал. Повтори с томом — файл остался.`
+```bash
+[czar@svinoserver api]$ docker run -d --name vol-test api-multistage:v2
+743e90fc8fb0f014afb1a77d2f9b22b2f18da2b047c7c8b9d7ac23f5059383f3
+[czar@svinoserver api]$ echo "hello, i will die :D" > /tmp/test.txt
+[czar@svinoserver api]$ docker cp /tmp/test.txt vol-test:/app/test.txt
+Successfully copied 21B (transferred 2.05kB) to vol-test:/app/test.txt
+[czar@svinoserver api]$ cat /tmp/test.txt
+hello, i will die :D
+
+[czar@svinoserver api]$ docker rm -f vol-test
+vol-test
+[czar@svinoserver api]$ docker run -d --name vol-test api-multistage:v2
+f7708ac8e1f9a6d8c0a62870a6e725e587e40a15fa5c26664c91e084baffcd3e
+[czar@svinoserver api]$ docker diff vol-test
+C /tmp
+A /tmp/hsperfdata_root
+A /tmp/hsperfdata_root/1
+[czar@svinoserver api]$ docker cp vol-test:/app/test.txt /tmp/check2.txt 2>&1
+Error response from daemon: Could not find the file /app/test.txt in container vol-test
+```
+В общем файл пропал, грустим :(  
+Теперь то же самое с volume:
+```bash
+[czar@svinoserver api]$ docker volume create api-data
+api-data
+[czar@svinoserver api]$ docker run -d --name vol-test2 -v api-data:/data api-multistage:v2
+1354f52e1634e4a06b22d8ff7825668733af62ebff1b55e9887b8d54ccc56bea
+[czar@svinoserver api]$ echo "hello, i will survive :D" > /tmp/persisted.txt
+[czar@svinoserver api]$ docker cp /tmp/persisted.txt vol-test2:/data/persisted.txt
+Successfully copied 25B (transferred 2.05kB) to vol-test2:/data/persisted.txt
+[czar@svinoserver api]$ docker diff vol-test2
+A /data
+C /tmp
+A /tmp/hsperfdata_root
+A /tmp/hsperfdata_root/1
+[czar@svinoserver api]$ docker rm -f vol-test2
+vol-test2
+[czar@svinoserver api]$ docker run -d --name vol-test2 -v api-data:/data api-multistage:v2
+978d2145f4e5766ddf26c018c8c49f89b1e16ff806b9bf68d975583787a645f1
+[czar@svinoserver api]$ docker cp vol-test2:/data/persisted.txt /tmp/check3.txt
+Successfully copied 25B (transferred 2.05kB) to /tmp/check3.txt
+[czar@svinoserver api]$ cat /tmp/check3.txt
+hello, i will survive :D
+```
+Все чикибомбони!
+
+# Часть 7
+> Запусти образ под gVisor (runsc) и сравни его изоляцию с обычным Docker и своим скриптом. Разберись, чем gVisor устроен иначе и почему его считают более изолированным. Отдельно ответь на вопрос: что у обычного контейнера остаётся общим с хостом в любом случае и почему это предел контейнерной изоляции. Выводы — в README.
+
+Поставили `gVisor` и т.д.
+Добавим в `/etc/docker/daemon.json` регистрацию рантайма и перезаупстим докер через `systemctl`:
+```json
+{
+  "runtimes": {
+    "runsc": {
+      "path": "/usr/bin/runsc"
+    }
+  }
+}
+```
+Собираем и запускаем контейнер как обычно. Смотрим рантайм и пид:
+```bash
+[czar@svinoserver api]$ docker build -f Dockerfile.multistaged -t api:multistage .
+
+Sending build context to Docker daemon  36.35kB
+...
+Successfully built 1bb055fef420
+Successfully tagged api:multistage
+
+docker run -d \
+  --name api-runc \
+  -p 8080:8080 \
+  api:multistage
+
+[czar@svinoserver api]$ docker run -d \
+  --name api-runc \
+  -p 8080:8080 \
+  api:multistage
+64cc9b1f60f35c5312ad2a57a15e5453a7f792bf3d4936a5881a83b176b7dc45
+
+[czar@svinoserver api]$ curl http://localhost:8080/health
+OK
+
+[czar@svinoserver api]$ docker inspect api-runc --format '{{.HostConfig.Runtime}}'
+runc
+
+[czar@svinoserver api]$ docker inspect api-runc --format '{{.State.Pid}}'
+454006
+```
+Теперь то же самое через `gVisor`:
+```bash
+[czar@svinoserver api]$ docker rm -f api-runc
+api-runc
+
+[czar@svinoserver api]$ docker run -d \
+  --name api-runsc \
+  --runtime=runsc \
+  -p 8080:8080 \
+  api:multistage
+4c47a857d38b1450064e471c30614c81f615d75a03e08bc19cd9e72e1a3de672
+
+[czar@svinoserver api]$ curl http://localhost:8080/health
+OK
+
+[czar@svinoserver api]$ docker inspect api-runsc --format '{{.HostConfig.Runtime}}'
+runsc
+
+[czar@svinoserver api]$ docker inspect api-runsc --format '{{.State.Pid}}'
+464332
+```
+Через `runsc` все чикибомбони 😎
+
+ОТДЕЛЬНО ОТВЕЧАЮ НА ВОПРОС:  
+Обычный контейнер не является отдельной виртуалкой. Несмотря на изоляцию PID, networkи т.д. контейнер и host используют одно ядро Linux. Namespaces, cgroups, capabilities и seccomp ограничивают доступ процесса к ресурсам и системным интерфейсам, но не создают отдельного экземпляра ядра.  
+Это создает уязвимость, которая может привести к выходу из контейнера. gVisor добавляет дополнительный слой, уменьшая прямое взаимодействие приложения с host kernel.
+
+
+
+
+
+
+
+
+
+
+
+
+# КОНЕЦ
