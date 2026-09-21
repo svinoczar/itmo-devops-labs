@@ -212,7 +212,7 @@ Namespace процесса сервиса (запущен через mydocker.sh
 - 5 namespace изолированы (IPC, mount, net, PID, UTS): у сервиса **свои ID**, отличные от хоста.
 - 3 namespace не изолированы (cgroup, time, user): ID **совпадают с хостом**.
 
-## 5.Dockerfile
+## 6.Dockerfile
 ### 1. single-stage
 Прописываем докерфайл для single-stage и запускаем его командой:
 ```Python
