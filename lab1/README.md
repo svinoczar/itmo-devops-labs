@@ -573,33 +573,7 @@ Sending build context to Docker daemon  36.35kB
 Step 1/5 : FROM maven:3.9-eclipse-temurin-21
 3.9-eclipse-temurin-21: Pulling from library/maven
 91f9926a0587: Pulling fs layer
-edd1ed89f0d4: Pulling fs layer
-a0f1cfdec651: Pulling fs layer
-81a217830566: Pulling fs layer
-e5d77f4fb216: Pulling fs layer
-abd660e00db2: Pulling fs layer
-1e47edd31b66: Pulling fs layer
-2140a5e2ab92: Pulling fs layer
-6e8eb09ed21b: Pulling fs layer
-bb0eae36b0e8: Download complete
-abd660e00db2: Download complete
-a0f1cfdec651: Download complete
-cce25323767b: Download complete
-6e8eb09ed21b: Download complete
-2140a5e2ab92: Download complete
-81a217830566: Download complete
-1e47edd31b66: Download complete
-e5d77f4fb216: Download complete
-edd1ed89f0d4: Download complete
-edd1ed89f0d4: Pull complete
-1e47edd31b66: Pull complete
-91f9926a0587: Download complete
-91f9926a0587: Pull complete
-abd660e00db2: Pull complete
-6e8eb09ed21b: Pull complete
-e5d77f4fb216: Pull complete
-81a217830566: Pull complete
-a0f1cfdec651: Pull complete
+...
 2140a5e2ab92: Pull complete
 Digest: sha256:c2a2c58516d160f43b50f12baa427ca86989e0bc942609e04aff61da5d9a7d74
 Status: Downloaded newer image for maven:3.9-eclipse-temurin-21
@@ -615,12 +589,7 @@ Step 4/5 : RUN mvn -B package -DskipTests
 [INFO] Scanning for projects...
 [INFO] 
 [INFO] -------------------------< ru.itmo.devops:api >-------------------------
-[INFO] Building api 1.0.0
-[INFO]   from pom.xml
-[INFO] --------------------------------[ jar ]---------------------------------
-[INFO] Downloading from central: https://repo.maven.apache.org/maven2/org/apache/maven/plugins/maven-resources-plugin/3.4.0/maven-resources-plugin-3.4.0.pom
 ...
-[INFO] Building jar: /app/target/api-1.0.0.jar
 [INFO] ------------------------------------------------------------------------
 [INFO] BUILD SUCCESS
 [INFO] ------------------------------------------------------------------------
@@ -669,144 +638,9 @@ Step 5/11 : COPY src ./src
  ---> 31e3da5ba480
 Step 6/11 : RUN mvn -B package -DskipTests
  ---> Running in e70a48e214c6
-[INFO] Scanning for projects...
-[INFO] 
-[INFO] -------------------------< ru.itmo.devops:api >-------------------------
-[INFO] Building api 1.0.0
-[INFO]   from pom.xml
-[INFO] --------------------------------[ jar ]---------------------------------
-[INFO] 
-[INFO] --- resources:3.4.0:resources (default-resources) @ api ---
-[INFO] skip non existing resourceDirectory /src/src/main/resources
-[INFO] 
-[INFO] --- compiler:3.13.0:compile (default-compile) @ api ---
-[INFO] Recompiling the module because of changed source code.
-[INFO] Compiling 1 source file with javac [debug release 21] to target/classes
-[INFO] 
-[INFO] --- resources:3.4.0:testResources (default-testResources) @ api ---
-[INFO] skip non existing resourceDirectory /src/src/test/resources
-[INFO] 
-[INFO] --- compiler:3.13.0:testCompile (default-testCompile) @ api ---
-[INFO] No sources to compile
-[INFO] 
-[INFO] --- surefire:3.5.4:test (default-test) @ api ---
-[INFO] Tests are skipped.
-[INFO] 
-[INFO] --- jar:3.4.2:jar (default-jar) @ api ---
-[INFO] Building jar: /src/target/api-1.0.0.jar
-[INFO] ------------------------------------------------------------------------
-[INFO] BUILD SUCCESS
-[INFO] ------------------------------------------------------------------------
-[INFO] Total time:  1.205 s
-[INFO] Finished at: 2026-09-21T12:16:07Z
-[INFO] ------------------------------------------------------------------------
- ---> Removed intermediate container e70a48e214c6
- ---> 102ffbb53ab2
-Step 7/11 : FROM gcr.io/distroless/java21-debian12
-latest: Pulling from distroless/java21-debian12
-3214acf345c0: Pulling fs layer
-ef49c20a7b35: Pulling fs layer
-dd64bf2dd177: Pulling fs layer
-52630fc75a18: Pulling fs layer
-dcaa5a89b0cc: Pulling fs layer
-7c12895b777b: Pulling fs layer
-250755fb415d: Pulling fs layer
-66da007fd54f: Pulling fs layer
-b839dfae01f6: Pulling fs layer
-526604835308: Pulling fs layer
-b16bb3b2bd07: Pulling fs layer
-bf7a4185f015: Pulling fs layer
-990a9c434e5e: Pulling fs layer
-069d1e267530: Pulling fs layer
-1fd3329b0de2: Pulling fs layer
-c65bb0c25578: Pulling fs layer
-8928cb22aa37: Pulling fs layer
-08dd3c4351e9: Pulling fs layer
-4486a6a259bb: Pulling fs layer
-ba6750202c26: Pulling fs layer
-ef335559898d: Pulling fs layer
-6d7292fc835d: Pulling fs layer
-d38b7f3e8045: Pulling fs layer
-ace43640e860: Pulling fs layer
-5822fa015fc5: Pulling fs layer
-2780920e5dbf: Pulling fs layer
-3a212aea01d1: Pulling fs layer
-f164bc9f2b9e: Pulling fs layer
-1e8acdaa2607: Pulling fs layer
-a812c900745e: Pulling fs layer
-52630fc75a18: Download complete
-7c12895b777b: Download complete
-66da007fd54f: Download complete
-2780920e5dbf: Download complete
-3214acf345c0: Download complete
-dd64bf2dd177: Download complete
-b839dfae01f6: Download complete
-dcaa5a89b0cc: Download complete
-526604835308: Download complete
-526604835308: Pull complete
-d38b7f3e8045: Download complete
-4486a6a259bb: Download complete
-990a9c434e5e: Download complete
-ba6750202c26: Download complete
-990a9c434e5e: Pull complete
-6d7292fc835d: Download complete
-b16bb3b2bd07: Download complete
-bf7a4185f015: Download complete
-08dd3c4351e9: Download complete
-5822fa015fc5: Download complete
-250755fb415d: Download complete
-8928cb22aa37: Download complete
-a812c900745e: Download complete
-069d1e267530: Download complete
-3a212aea01d1: Download complete
-1e8acdaa2607: Download complete
-f164bc9f2b9e: Download complete
-ef49c20a7b35: Download complete
-ef49c20a7b35: Pull complete
-bf7a4185f015: Pull complete
-7c12895b777b: Pull complete
-2780920e5dbf: Pull complete
-ace43640e860: Download complete
-52630fc75a18: Pull complete
-3214acf345c0: Pull complete
-dd64bf2dd177: Pull complete
-b839dfae01f6: Pull complete
-dcaa5a89b0cc: Pull complete
-069d1e267530: Pull complete
-c65bb0c25578: Download complete
-ef335559898d: Download complete
-c65bb0c25578: Pull complete
-250755fb415d: Pull complete
-4486a6a259bb: Pull complete
-ba6750202c26: Pull complete
-8928cb22aa37: Pull complete
-ef335559898d: Pull complete
-d38b7f3e8045: Pull complete
-6d7292fc835d: Pull complete
-ace43640e860: Pull complete
-5822fa015fc5: Pull complete
-3a212aea01d1: Pull complete
-f164bc9f2b9e: Pull complete
-a812c900745e: Pull complete
-1e8acdaa2607: Pull complete
-b16bb3b2bd07: Pull complete
-08dd3c4351e9: Pull complete
-66da007fd54f: Pull complete
-1fd3329b0de2: Download complete
-1fd3329b0de2: Pull complete
-Digest: sha256:f34fd3e4e2d7a246d764d0614f5e6ffb3a735930723fac4cfc25a72798950262
-Status: Downloaded newer image for gcr.io/distroless/java21-debian12:latest
- ---> f34fd3e4e2d7
-Step 8/11 : WORKDIR /app
- ---> Running in a612f242b6f3
- ---> Removed intermediate container a612f242b6f3
- ---> 9b9dbb28099b
-Step 9/11 : COPY --from=build /src/target/api-1.0.0.jar /app/api.jar
- ---> cecc862fe6c2
-Step 10/11 : EXPOSE 8080
- ---> Running in 2f4b09bb9bd1
- ---> Removed intermediate container 2f4b09bb9bd1
- ---> 6abd60982945
+
+...
+
 Step 11/11 : ENTRYPOINT ["java", "-jar", "/app/api.jar"]
  ---> Running in bcd617f18a0b
  ---> Removed intermediate container bcd617f18a0b
@@ -914,63 +748,7 @@ f34fd3e4e2d7   N/A             bazel build //java:temurin_jre_21_amd64         1
 Sending build context to Docker daemon  36.35kB
 Step 1/11 : FROM maven:3.9-eclipse-temurin-21 AS build
  ---> c2a2c58516d1
-Step 2/11 : WORKDIR /src
- ---> Using cache
- ---> 5a1b16aa00f3
-Step 3/11 : COPY pom.xml .
- ---> Using cache
- ---> 99e2215edcf6
-Step 4/11 : RUN mvn -B dependency:go-offline
- ---> Using cache
- ---> ac6ac629c1ae
-Step 5/11 : COPY src ./src
- ---> 0793cae78cc9
-Step 6/11 : RUN mvn -B package -DskipTests
- ---> Running in 216778dc6a80
-[INFO] Scanning for projects...
-[INFO] 
-[INFO] -------------------------< ru.itmo.devops:api >-------------------------
-[INFO] Building api 1.0.0
-[INFO]   from pom.xml
-[INFO] --------------------------------[ jar ]---------------------------------
-[INFO] 
-[INFO] --- resources:3.4.0:resources (default-resources) @ api ---
-[INFO] skip non existing resourceDirectory /src/src/main/resources
-[INFO] 
-[INFO] --- compiler:3.13.0:compile (default-compile) @ api ---
-[INFO] Recompiling the module because of changed source code.
-[INFO] Compiling 1 source file with javac [debug release 21] to target/classes
-[INFO] 
-[INFO] --- resources:3.4.0:testResources (default-testResources) @ api ---
-[INFO] skip non existing resourceDirectory /src/src/test/resources
-[INFO] 
-[INFO] --- compiler:3.13.0:testCompile (default-testCompile) @ api ---
-[INFO] No sources to compile
-[INFO] 
-[INFO] --- surefire:3.5.4:test (default-test) @ api ---
-[INFO] Tests are skipped.
-[INFO] 
-[INFO] --- jar:3.4.2:jar (default-jar) @ api ---
-[INFO] Building jar: /src/target/api-1.0.0.jar
-[INFO] ------------------------------------------------------------------------
-[INFO] BUILD SUCCESS
-[INFO] ------------------------------------------------------------------------
-[INFO] Total time:  1.137 s
-[INFO] Finished at: 2026-09-21T12:26:47Z
-[INFO] ------------------------------------------------------------------------
- ---> Removed intermediate container 216778dc6a80
- ---> 206ebc730680
-Step 7/11 : FROM gcr.io/distroless/java21-debian12
- ---> f34fd3e4e2d7
-Step 8/11 : WORKDIR /app
- ---> Using cache
- ---> 9b9dbb28099b
-Step 9/11 : COPY --from=build /src/target/api-1.0.0.jar /app/api.jar
- ---> a72207dd3cde
-Step 10/11 : EXPOSE 8080
- ---> Running in 3d8d96ec6156
- ---> Removed intermediate container 3d8d96ec6156
- ---> 91866bcda789
+...
 Step 11/11 : ENTRYPOINT ["java", "-jar", "/app/api.jar"]
  ---> Running in 5794a82f02f3
  ---> Removed intermediate container 5794a82f02f3
