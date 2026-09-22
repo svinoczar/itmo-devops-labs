@@ -64,8 +64,9 @@ real	0m1.722s
 user	0m0.008s
 sys	0m0.009s
 ```
-real — реальное время 
-user/sys — процессорное время
+-real — реальное время 
+-user/sys — процессорное время <br>
+у них маленькие значения, потому что сервер sleep
 
 Ответ /load:
 ```
@@ -75,6 +76,8 @@ real	0m7.454s
 user	0m0.008s
 sys	0m0.009s
 ```
+Функция делает заданное количество запросов на другие адреса => подскакивает время.
+
 Ответ /metrics:
 ```
 maria@ubuntu-dev:~/itmo-devops-labs/lab2/api$ curl -s localhost:5000/metrics | grep -E '^http_(requests|request_errors)'
@@ -91,7 +94,8 @@ http_requests_created{method="GET",path="/metrics",status="200"} 1.7900993018919
 http_request_errors_total{method="GET",path="/fail"} 8.0
 http_request_errors_created{method="GET",path="/fail"} 1.7900983969137971e+09
 ```
-
+Видим количество запросов к каждому адресу, сделанное к этому моменту. Метку ошибки только у /fail запросов (8 запросов = 8 ошибок).
++ /metrics считает сама себя, так как тоже является запросом
 
 ## Часть 1. Метрики (Prometheus + Grafana)
 (заполним позже)
