@@ -10,7 +10,7 @@
 
 ## Часть 0. Сервис api 
 Создаем HTTP сервер с следующей структурой проекта: <br>
-api/
+api/ <br>
 ├── app.py             
 ├── requirements.txt   
 └── .venv/              
