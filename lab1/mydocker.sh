@@ -1,5 +1,5 @@
 #!/bin/bash
-set -uo pipefail   # временно без -e, чтобы видеть ошибки, а не падать молча
+set -uo pipefail
 
 CONTAINER_NAME="new-ultimate-innovative-russian-container-better-than-docker"
 CGROUP_PATH="/sys/fs/cgroup/${CONTAINER_NAME}"
@@ -41,16 +41,15 @@ echo "Cgroup: ${CGROUP_PATH}"
 echo ""
 echo "Для остановки контейнера: sudo systemctl stop ${CONTAINER_NAME}"
 
-# echo "===== Диагностика ====="
-# echo "-- Namespaces --"
+# echo "Проверки: "
+# echo "Namespaces"
 # sudo nsenter -t "${PID}" -p -m ps -ef
-# echo "-- Capabilities (CapEff) --"
+# echo "Capabilities (CapEff)"
 # sudo nsenter -t "${PID}" -p -m cat /proc/1/status | grep CapEff
-# echo "-- Seccomp --"
+# echo "Seccomp"
 # sudo nsenter -t "${PID}" -p -m cat /proc/1/status | grep Seccomp
-# echo "-- Health check --"
+# echo "Health check"
 # sudo nsenter -t "${PID}" -n curl -s http://localhost:8080/health
 # echo ""
-# echo "-- Cgroup лимиты --"
+# echo "Cgroup лимиты"
 # cat "${CGROUP_PATH}/memory.max" "${CGROUP_PATH}/cpu.max" "${CGROUP_PATH}/pids.max"
-# echo ""
