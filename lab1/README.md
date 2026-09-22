@@ -5,7 +5,7 @@
 
 Тестовый сервис Java API (Java 21)
 
-![hot-dog](sources/1.png)
+![hot-dog](resources/1.png)
 
 Сборка и запуск:
 
@@ -32,8 +32,8 @@ curl localhost:8080/burn
 
 Оно работает (клянусь):  
 
-![/healthcheck](sources/2.png)
-![ps aux](sources/3.png)
+![/healthcheck](resources/2.png)
+![ps aux](resources/3.png)
 
 PID: 595098
 
@@ -551,7 +551,7 @@ root          39       0 66 20:09 ?        00:00:00 ps -ef
 3. **Seccomp**: скрипт банит один `uname`, Docker банит всё, что не в списке ~300 разрешённых.
 4. **cgroups (память/CPU/pids)**: здесь все идентично.
 
-# Образы
+# Часть 6
 > Твоему скрипту не хватало готовой файловой системы — её и даёт образ.
 > - Напиши Dockerfile для api и собери образ.
 > - Сделай multi-stage-сборку с минимальной базой (для Go подойдёт scratch или distroless). Сравни размер, число слоёв и что переиспользовалось из кэша при повторной сборке.
@@ -1100,15 +1100,63 @@ runsc
 Обычный контейнер не является отдельной виртуалкой. Несмотря на изоляцию PID, networkи т.д. контейнер и host используют одно ядро Linux. Namespaces, cgroups, capabilities и seccomp ограничивают доступ процесса к ресурсам и системным интерфейсам, но не создают отдельного экземпляра ядра.  
 Это создает уязвимость, которая может привести к выходу из контейнера. gVisor добавляет дополнительный слой, уменьшая прямое взаимодействие приложения с host kernel.
 
+# Часть 8
+> Сними метрики контейнера (память, CPU, throttling) из cgroup или через cAdvisor и собери дашборд. Реши сам, что важно видеть, и выбери 3 метрики под алерты — по каждой напиши, что она ловит и чем грозит.
 
+Наблюдаем за `api-runc`. Цепочка: cAdvisor → Prometheus → Grafana.
 
+### cAdvisor и Prometheus
+Поднимаем контейнер с cAdvisor:
 
+```bash
+docker run -d --name cadvisor --privileged -p 8085:8080 \
+  -v /:/rootfs:ro -v /run:/run:ro -v /sys:/sys:ro \
+  -v /var/lib/docker:/var/lib/docker:ro \
+  -v /var/lib/containerd:/var/lib/containerd:ro \
+  -v /dev/disk:/dev/disk:ro \
+  ghcr.io/google/cadvisor:0.57.0
+```
 
+В `http://localhost:8085/metrics` появился ряд `container_memory_usage_bytes{name="api-runc"}`.
+Конфигурация [prometheus.yml](prometheus.yml) опрашивает cAdvisor каждые 5 секунд.  
+Поднимаем нашего прометея:
 
+```bash
+docker run -d --name prometheus -p 9090:9090 \
+  --add-host=host.docker.internal:host-gateway \
+  -v /home/czar/itmo/devops/lab1/prometheus.yml:/etc/prometheus/prometheus.yml:ro \
+  prom/prometheus:latest
+```
 
+### Дашбордик
 
+Теперь поднимаем ✨***Grafana***✨:
 
+```bash
+docker run -d --name grafana -p 3000:3000 \
+  --add-host=host.docker.internal:host-gateway grafana/grafana:latest
+```
+В качестве источника указываем в графане Prometheus по адресу `http://host.docker.internal:9090`. Не пишем `localhost`, т.к. он бы указывал на саму графану. Решил не импортировать весь дашборд из прометея, а собрал три панели для нашего процесса.  
+Память (от лимита), ЦПУ (от квоты) и ЦПУ троттлинг. Названия говорят сами за себя.
 
+Дашборд в графане после вызова нагрузочных ендпоинтов:
+![графаночка](resources/grafana.png)
 
+Ну и еще один скрин после небольшого ожидания:
+![графаночка еще одна](resources/grafana2.png)
+
+### Алерты
+
+Первый алерт — использование памяти выше 90% лимита в течение минуты (`container_memory_usage_bytes / container_spec_memory_limit_bytes > 0.9`). Ловит сокращение запаса до лимита, срабатывает, чтобы предупредить о возможном OOM.  
+
+Второй — доля периодов с CPU throttling выше 25% в течение двух минут (`rate(container_cpu_cfs_throttled_periods_total{name="api-runc"}[5m]) / rate(container_cpu_cfs_periods_total{name="api-runc"}[5m]) > 0.25`). Ловит ситуацию, когда контейнер регулярно исчерпывает CPU-квоту.
+
+Третий алерт — использование CPU выше 85% квоты в течение пяти минут (`100 * rate(container_cpu_usage_seconds_total{name="api-runc",cpu="total"}[2m]) / ignoring(cpu) (container_spec_cpu_quota{name="api-runc"} / container_spec_cpu_period{name="api-runc"}) > 85`). Ловит устойчивую работу почти у выделенной квоты, даже если процессор пока троттлит мало.
 
 # КОНЕЦ
+
+*Спасибо за внимание!*
+
+P.S.  
+***Как я писал этот отчет:***  
+![](resources/onfire.jfif)
