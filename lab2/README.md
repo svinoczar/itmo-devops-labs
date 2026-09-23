@@ -15,9 +15,17 @@ api/ <br>
 ├── requirements.txt   
 └── .venv/              
 
--прописываем роуты
--прописываем метрики по формату RED(L-в нашем случае)
--прописываем хуки 
+**1. прописываем роуты:** <br>
+GET /health — возвращает ok;<br>
+GET /fail — возвращает ошибку 5xx и увеличивает счётчик ошибок;<br>
+GET /slow — отвечает медленно (спит 1–3 секунды);<br>
+GET /load — делает пачку запросов к себе, чтобы подскочил RPS.<br>
+(прописываем хуки Flask для работы функций)
+
+**2. прописываем метрики:** <br>
+счётчик запросов,<br>
+счётчик ошибок,<br>
+гистограмму времени ответа (RED);<br>
 
 Запускаем локально:
 ```
@@ -97,11 +105,92 @@ http_request_errors_created{method="GET",path="/fail"} 1.7900983969137971e+09
 Видим количество запросов к каждому адресу, сделанное к этому моменту. Метку ошибки только у /fail запросов (8 запросов = 8 ошибок). <br>
 /metrics считает сама себя, так как тоже является запросом
 
+**3. устанавливаем зависимости для работы OpenTelemetry и JSON-логов**<br>
+Зависимости:
+```Python
+(.venv) maria@ubuntu-dev:~/itmo-devops-labs/lab2/api$ pip install \
+  opentelemetry-distro \
+  opentelemetry-exporter-otlp \
+  opentelemetry-instrumentation-flask
+```
+и импорты их в app.py.
+
+Прописываем провайдер и экспортер:
+```Python
+resource = Resource.create({"service.name": os.getenv("OTEL_SERVICE_NAME", "api")})
+provider = TracerProvider(resource=resource)
+otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+provider.add_span_processor(
+    BatchSpanProcessor(OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True))
+)
+trace.set_tracer_provider(provider) #делаем глобальным
+tracer = trace.get_tracer("api") #трейсер для создания своих спанов
+```
+Resource.create - имя сервиса в Jaeger <br>
+endpoint - адрес OTLP-приёмника (пропишем в части 3)
+
+Прописываем логгеры:
+```Python
+class JsonFormatter(logging.Formatter):
+    def format(self, record):
+        span = trace.get_current_span() #узнает активный спан
+        ctx = span.get_span_context() if span else None
+        trace_id = format(ctx.trace_id, "032x") if ctx and ctx.trace_id else ""
+        payload = { 
+            "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S.%fZ"),
+            "level": record.levelname, #уровень для фильтрации
+            "msg": record.getMessage(), #итоговое сообщение
+            "logger": record.name,
+            "trace_id": trace_id,
+        }
+        if record.exc_info:
+            payload["exc"] = self.formatException(record.exc_info)
+        return json.dumps(payload, ensure_ascii=False)
+
+
+handler = logging.StreamHandler(sys.stdout) #пишет в stdout, оттуда уходит в Loki
+handler.setFormatter(JsonFormatter())
+log = logging.getLogger("api")
+log.setLevel(logging.INFO)
+log.handlers = [handler]
+log.propagate = False #не дублирует в родительский логер
+```
+format(record) - получает одну запись лога и возвращает строку, которая уйдёт в вывод <br>
+```Python
+FlaskInstrumentor().instrument_app(app) #создает корневой спан
+```
+
+**4. прописываем логи** <br>
+/health:
+```Python
+log.info("health check")
+```
+/fail:
+```Python
+span = trace.get_current_span()
+span.set_status(trace.Status(trace.StatusCode.ERROR, "simulated failure")) #подсветится красным
+span.set_attribute("error", True) #тег для отображения ошибки
+log.error("simulated failure on /fail")
+```
+/slow:
+```Python
+with tracer.start_as_current_span("slow-op") as sp: #создаем вложенный спан и открываем про входе
+  sp.set_attribute("delay.seconds", delay) #закрепляем значение за спаном
+  log.info(f"slow op start delay={delay:.2f}") 
+  time.sleep(delay)
+log.info("slow op done")
+```
+/load:
+```Python
+log.info(f"load fired {count} requests")
+```
+
 ## Часть 1. Метрики (Prometheus + Grafana)
 (заполним позже)
 
 ## Часть 2. Логи (Loki + Grafana)
 (заполним позже)
+
 
 ## Часть 3. Трейсы (OpenTelemetry + Jaeger)
 (заполним позже)
