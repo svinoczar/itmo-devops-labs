@@ -1,6 +1,8 @@
 import os
 import time
 from flask import Flask, request, Response
+import random
+import httpx
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
 app = Flask(__name__)
@@ -46,17 +48,29 @@ def health():
 
 @app.route('/fail')
 def fail():
-    return 'ok'
+    return Response('simulated failure', status=500)
 
 
 @app.route('/slow')
 def slow():
-    return 'ok'
+    num = random.uniform(1.0, 3.0)
+    time.sleep(num)
+    return f'slept {num:.2f}'
 
+
+SELF_URL = os.getenv('SELF_URL', 'http://localhost:5000')
 
 @app.route('/load')
 def load():
-    return 'ok'
+    count = int(request.args.get('count', 20))
+    paths = ['/health', '/fail', '/slow']
+    for i in range(count):
+        path = paths[i % 3]
+        try:
+            httpx.get(f'{SELF_URL}{path}', timeout=10.0)
+        except Exception:
+            pass
+    return f'fired {count} requests'
 
 
 @app.route('/metrics')
