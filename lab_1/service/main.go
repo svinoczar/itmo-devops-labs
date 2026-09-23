@@ -24,19 +24,20 @@ func eatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	chunk := make([]byte, mb*1024*1024)
+	for i := range chunk {
+		chunk[i] = 1
+	}
 	memoryHog = append(memoryHog, chunk)
 
 	fmt.Fprintf(w, "Allocated %d MB. Total chunks: %d\n", mb, len(memoryHog))
 }
 
 func burnHandler(w http.ResponseWriter, r *http.Request) {
-	if isBurning.Swap(true) {
-		go func() {
-			for isBurning.Load() {
-			}
-		}()
-		fmt.Fprint(w, "Started CPU burn in background goroutine\n")
-	}
+	go func() {
+		for {
+		}
+	}()
+	fmt.Fprint(w, "Started CPU burn\n")
 }
 
 func stopBurnHandler(w http.ResponseWriter, r *http.Request) {
