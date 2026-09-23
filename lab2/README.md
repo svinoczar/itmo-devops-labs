@@ -197,6 +197,29 @@ log.info(f"load fired {count} requests")
 ```
 у каждого запроса свой id, кроме логов slow, у них одинаковый.
 
+**5.Dockerfile**<br>
+Так как в кубере все работает как контенер, необходимо наш серсер прописать в контейнер.
+Прописываем Dockerfile и собираем:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/api$ docker images | grep api
+api:0.1                                                                                               2f3e0527d9a5        250MB         60.4MB     
+```
+образ успешно собран.<br>
+Работает:
+```
+http_requests_total{method="GET",path="/health",status="200"} 1.0
+http_requests_total{method="GET",path="/fail",status="500"} 1.0
+http_requests_total{method="GET",path="/slow",status="200"} 1.0
+```
+
+Загружаем в minikube, чтобы он увидел образ:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/api$ minikube image load api:0.1
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/api$ minikube image ls | grep api
+registry.k8s.io/kube-apiserver:v1.37.0
+docker.io/library/api:0.1
+```
+
 
 ## Часть 1. Метрики (Prometheus + Grafana)
 (заполним позже)
