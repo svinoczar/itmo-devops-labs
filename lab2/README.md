@@ -137,7 +137,7 @@ class JsonFormatter(logging.Formatter):
         ctx = span.get_span_context() if span else None
         trace_id = format(ctx.trace_id, "032x") if ctx and ctx.trace_id else ""
         payload = { 
-            "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S.%fZ"),
+            ""ts": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
             "level": record.levelname, #уровень для фильтрации
             "msg": record.getMessage(), #итоговое сообщение
             "logger": record.name,
@@ -184,6 +184,19 @@ log.info("slow op done")
 ```Python
 log.info(f"load fired {count} requests")
 ```
+
+Тестируем (запускаем сервер и вызываем /health, /fail, /slow) и видим в выводе JSON:
+```
+{"ts": "2026-09-23T12:54:41.%fZ", "level": "INFO", "msg": "health check", "logger": "api", "trace_id": "5ce0051037278d8e31143890fa6a1c1c"}
+
+{"ts": "2026-09-23T12:54:41.%fZ", "level": "ERROR", "msg": "simulated failure on /fail", "logger": "api", "trace_id": "af116e9427667bcc4b8444baebb75878"}
+
+{"ts": "2026-09-23T12:54:41.%fZ", "level": "INFO", "msg": "slow op start num=1.71", "logger": "api", "trace_id": "e988c8fd654ba9072ab2784423810af6"}
+
+{"ts": "2026-09-23T12:54:42.%fZ", "level": "INFO", "msg": "slow op done", "logger": "api", "trace_id": "e988c8fd654ba9072ab2784423810af6"}
+```
+у каждого запроса свой id, кроме логов slow, у них одинаковый.
+
 
 ## Часть 1. Метрики (Prometheus + Grafana)
 (заполним позже)
