@@ -148,3 +148,45 @@ for i in $(seq 1 10); do curl -s http://localhost:8080/slow >/dev/null & done; w
 ```
 
 После двух-трёх интервалов scrape на графиках должны быть видны всплеск RPS, рост error ratio и p95. Результат фиксируется скриншотом RED-дашборда.
+
+## Часть 2. Логи: Loki и Alloy
+
+Для хранения логов развёрнут Loki в monolithic-режиме: все его роли выполняет один экземпляр, а данные сохраняются в filesystem-хранилище на PVC размером 5 GiB. Такая схема подходит для однодового учебного кластера, но в production вместо локального диска обычно используется общее объектное хранилище.
+
+Loki сам не забирает логи приложений, поэтому отдельно установлен Grafana Alloy в виде DaemonSet. На каждой ноде Alloy обнаруживает Pod API, читает его stdout через Kubernetes API, разбирает JSON и отправляет записи через `loki-gateway`:
+
+```text
+stdout API → Alloy → Loki gateway → Loki → Grafana
+```
+
+Компоненты установлены через Helm с сохранёнными в репозитории values-файлами:
+
+```bash
+helm upgrade --install loki grafana-community/loki --version 18.13.5 \
+  --namespace monitoring \
+  --values ./lab2/helm/monitoring/loki-values.yaml
+
+helm upgrade --install alloy grafana/alloy --version 1.12.1 \
+  --namespace monitoring \
+  --values ./lab2/helm/monitoring/alloy-values.yaml
+```
+
+Loki добавлен в существующую Grafana как дополнительный datasource через `kube-prometheus-stack-values.yaml`. Для поиска всех логов API используется LogQL:
+
+```logql
+{namespace="monitoring", app="api"}
+```
+
+Только записи уровня `ERROR` выбираются по низкокардинальному label `level`:
+
+```logql
+{namespace="monitoring", app="api", level="ERROR"}
+```
+
+`trace_id` не добавляется в labels Loki из-за высокой кардинальности. Он остаётся полем JSON и извлекается во время запроса:
+
+```logql
+{namespace="monitoring", app="api"} | json | trace_id="<trace_id>"
+```
+
+Работоспособность проверена вызовом `/fail`: в Grafana найдена структурированная запись уровня `ERROR` с полями `route=/fail`, `status_code=500`, `trace_id` и `span_id`.
