@@ -30,36 +30,121 @@ RED-сигналы представлены следующими метрика�
 
 Spring Boot автоматически инструментирован OpenTelemetry Java Agent. В `/slow` через OpenTelemetry API создаётся дочерний спан `slow-op`, а активный серверный спан `/fail` получает статус `ERROR`. Logback пишет структурированные JSON-логи; `trace_id` и `span_id` активного спана добавляются через MDC, поэтому лог можно сопоставить с трейсом.
 
-### Локальный запуск
-
-```bash
-cd lab2/api
-mvn package
-curl --fail --location \
-  https://repo.maven.apache.org/maven2/io/opentelemetry/javaagent/opentelemetry-javaagent/2.20.1/opentelemetry-javaagent-2.20.1.jar \
-  --output target/opentelemetry-javaagent.jar
-java -javaagent:target/opentelemetry-javaagent.jar \
-  -Dotel.traces.exporter=none \
-  -Dotel.logs.exporter=none \
-  -Dotel.metrics.exporter=none \
-  -jar target/api-1.0.0.jar
-```
-
-Эти флаги отключают OTLP-экспорт при локальной проверке. В контейнере это делается автоматически: метрики идут через `/metrics`, логи — через `stdout`, поэтому OTLP нужен только трейсингу. Позднее Helm values передаст сервису `OTEL_EXPORTER_OTLP_ENDPOINT` с адресом OTLP-приёмника Jaeger.
-
-Проверка:
-
-```bash
-curl http://localhost:8080/health
-curl http://localhost:8080/fail
-curl http://localhost:8080/slow
-curl 'http://localhost:8080/load?requests=50'
-curl http://localhost:8080/metrics
-```
-
 ### Сборка контейнера
 
 ```bash
 docker build -t lab2-api:local lab2/api
 docker run --rm -p 8080:8080 lab2-api:local
 ```
+
+## Часть 1. Метрики: Prometheus и Grafana
+
+В `kind` через Helm развёрнуты API и `kube-prometheus-stack`. `ServiceMonitor` подключает `/metrics` к Prometheus, а в Grafana собран RED-дашборд с RPS, долей ошибок и p95 времени ответа; его работа проверена вызовами `/load`, `/fail` и `/slow`.
+
+Для локального Kubernetes используется `kind`: он запускает ноды как Docker-контейнеры и позволяет загрузить уже собранный образ без внешнего registry. Понадобятся `kind`, `kubectl` и `helm`.
+
+### Кластер и образ сервиса
+
+```bash
+kind create cluster --name lab2
+kind load docker-image lab2-api:local --name lab2
+kubectl cluster-info --context kind-lab2
+```
+
+Загрузка через `kind load` помещает образ в container runtime нод. В Helm chart сервиса используется `image: lab2-api:local` и `imagePullPolicy: IfNotPresent`, иначе Kubernetes попытается скачать локальный образ из внешнего registry.
+
+### Prometheus
+
+Prometheus и Grafana устанавливаются chart-ом `kube-prometheus-stack`. Вместе с ними устанавливается Prometheus Operator и CRD `ServiceMonitor`.
+
+```bash
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+
+helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
+  --namespace monitoring \
+  --create-namespace
+
+kubectl get pods -n monitoring
+```
+
+После готовности стека устанавливается собственный Helm chart `api`:
+
+```bash
+helm upgrade --install api ./lab2/helm/api --namespace monitoring
+```
+
+Chart сервиса создаёт `Deployment`, `Service` и `ServiceMonitor`. Связь строится по именам и labels:
+
+- `Service` выбирает поды по label `app: api` и публикует порт с именем `http`;
+- `ServiceMonitor.spec.selector` выбирает этот `Service` по `app: api`;
+- `ServiceMonitor` скрейпит `path: /metrics` через порт `http`;
+- label `release: monitoring` позволяет Prometheus из Helm-релиза `monitoring` выбрать этот `ServiceMonitor`.
+
+Минимальная существенная часть `ServiceMonitor`:
+
+```yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: api
+  labels:
+    release: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: api
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+```
+
+Проверка target в Prometheus:
+
+```bash
+kubectl port-forward -n monitoring \
+  svc/monitoring-kube-prometheus-prometheus 9090:9090
+```
+
+После этого в `http://localhost:9090/targets` target `api` должен иметь состояние `UP`. Дополнительная проверка запросом PromQL: `up{service="api"}`.
+
+### Grafana и RED-дашборд
+
+`kube-prometheus-stack` уже добавляет установленный Prometheus в Grafana как datasource. Пароль администратора хранится в Kubernetes Secret:
+
+```bash
+kubectl get secret -n monitoring monitoring-grafana \
+  -o jsonpath='{.data.admin-password}' | base64 --decode; echo
+
+kubectl port-forward -n monitoring svc/monitoring-grafana 3000:80
+```
+
+Grafana открывается на `http://localhost:3000`, пользователь — `admin`. На новом dashboard создаются три панели:
+
+```promql
+# RPS
+sum(rate(api_http_requests_total[1m]))
+
+# доля ответов 5xx, %
+100 * sum(rate(api_http_request_errors_total[5m]))
+  / sum(rate(api_http_requests_total[5m]))
+
+# p95 времени ответа, секунды
+histogram_quantile(
+  0.95,
+  sum by (le) (rate(api_http_request_duration_seconds_bucket[5m]))
+)
+```
+
+Для проверки API пробрасывается наружу, после чего создаётся нагрузка:
+
+```bash
+kubectl port-forward -n monitoring svc/api 8080:8080
+
+curl 'http://localhost:8080/load?requests=100'
+for i in $(seq 1 20); do curl -s http://localhost:8080/fail >/dev/null; done
+for i in $(seq 1 10); do curl -s http://localhost:8080/slow >/dev/null & done; wait
+```
+
+После двух-трёх интервалов scrape на графиках должны быть видны всплеск RPS, рост error ratio и p95. Результат фиксируется скриншотом RED-дашборда.
