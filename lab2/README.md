@@ -269,7 +269,7 @@ helm/api/<br>
 Файлы заполнены по дефолту в соответсвии с шаблонами, сейчас будь править под наш проект.<br>
 
 Настраиваем **Chart.yaml** - паспорт чарта (имя, версия, тип). В дефолтном заполнении не соответсвует только версия app, поэтому меняем ее и получем:
-```
+```Python
 #Chart.yaml
 
 apiVersion: v2
@@ -280,7 +280,7 @@ version: 0.1.0
 appVersion: "0.1"
 ```
 Настраиваем **values.yaml** - дефолтные значения для шаблонов. Сейчас этот файл очень громоздкий. Мы его почистим и оставим:
-```
+```Python
 #values.yaml
 
 replicaCount: 1  #число копий пода
@@ -312,7 +312,7 @@ Deployment отвечает за то сколько подов создать �
 - spec.template.spec.containers[] (имя, образ, порт контейнера)<br>
 
 Последние 3 отвечают за желаемое состояние, с которым все время сравнивает кубер текущее состояние сервиса. Получаем файл:
-```
+```Python
 #deployment.yaml
 
 apiVersion: apps/v1
@@ -350,7 +350,7 @@ spec:
 Service отвечает за стабильность доступа к подам. Так как айпишники контейнеров все время меняются, он дает им DNS-имена и направляет трафик на живые поды.<br>
 **service.yaml** <br>
 Файл сервича оставляем без изменений:
-```
+```Python
 #service.yaml
 
 apiVersion: v1
@@ -447,8 +447,147 @@ http_requests_total{method="GET",path="/slow",status="200"} 1.0
 Сервис работает через кубер. Ура спасибо.
 
 
-## Часть 1. Метрики (Prometheus + Grafana)
-(заполним позже)
+## Часть 1.Prometheus + Grafana
+Prometheus - база данныхз для метрик. <br>
+Для реализации этой части задания мы будем использовать готовый Helm-чарт: kube-prometheus-stack. <br>
+Он ставит сразу:
+- Prometheus (сбор метрик) <br>
+- Alertmanager (приём и рассылка алертов) <br>
+- Grafana(визуализаци) <br>
+- node-exporter (экспортёр метрик ноды) <br>
+- kube-state-metrics (экспортёр метрик K8s-объектов) <br>
+  
+Дакавать команду о скрепинге мы будем через ServiceMonitor, чтобы не править конфиг файл вручну.
+
+Добавляем репозиторий:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2$ helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+"prometheus-community" has been added to your repositories
+Hang tight while we grab the latest from your chart repositories...
+...Successfully got an update from the "prometheus-community" chart repository
+Update Complete. ⎈Happy Helming!⎈
+```
+Создаем **values.yaml** с настройками для чарта в папке monitoring.<br>
+В нем прописывается prometheus, настройка для ServiceMonitor, данные для grafana, alertmanager.
+
+Устанавливаем kube-prometheus-stack:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ helm install kube-prom prometheus-community/kube-prometheus-stack \
+  --namespace monitoring \
+  --create-namespace \
+  -f kube-prometheus-stack-values.yaml
+NAME: kube-prom
+LAST DEPLOYED: Fri Sep 25 13:56:02 2026
+NAMESPACE: monitoring
+STATUS: deployed
+REVISION: 1
+```
+установился, проверяем установку подов:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ kubectl get pods -n monitoring
+NAME                                                    READY   STATUS    RESTARTS   AGE
+alertmanager-kube-prom-kube-prometheus-alertmanager-0   2/2     Running   0          7m57s
+kube-prom-grafana-7dbdf8d889-q9v2c                      3/3     Running   0          8m3s
+kube-prom-kube-prometheus-operator-68764fddf6-r8qxj     1/1     Running   0          8m3s
+kube-prom-kube-state-metrics-58fb46f59-bb5bb            1/1     Running   0          8m3s
+kube-prom-prometheus-node-exporter-wnvjx                1/1     Running   0          8m3s
+prometheus-kube-prom-kube-prometheus-prometheus-0       2/2     Running   0          7m57s
+```
+- 2 alertmanager: сам alertmanager и config-reloader (следит за изменениями конфига Alertmanager)  <br>
+- 3 grafana: сама grafana, grafana-sc-dashboard (подхватывает новые дашборды), grafana-sc-datasources (отвечает за подключение к Prometheus)  <br>
+- 1 prometheus-operator: сам оператор    <br>
+- 2 prometheus-prometheus: сам prometheus и config-reloader (перезагружает конфиг Prometheus)  <br>
+
+Проверяем сервисы в namespace:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ kubectl get svc -n monitoring
+NAME                                     TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)                      AGE
+alertmanager-operated                    ClusterIP   None             <none>        9093/TCP,9094/TCP,9094/UDP   9m36s
+kube-prom-grafana                        ClusterIP   10.109.128.238   <none>        80/TCP                       9m42s
+kube-prom-kube-prometheus-alertmanager   ClusterIP   10.100.193.40    <none>        9093/TCP,8080/TCP            9m42s
+kube-prom-kube-prometheus-operator       ClusterIP   10.97.70.235     <none>        443/TCP                      9m42s
+kube-prom-kube-prometheus-prometheus     ClusterIP   10.103.62.166    <none>        9090/TCP,8080/TCP            9m42s
+kube-prom-kube-state-metrics             ClusterIP   10.107.5.75      <none>        8080/TCP                     9m42s
+kube-prom-prometheus-node-exporter       ClusterIP   10.99.140.190    <none>        9100/TCP                     9m42s
+prometheus-operated                      ClusterIP   None             <none>        9090/TCP                     9m36s
+```
+
+Проверяем работу Prometheus UI:
+запускаем в терминале 
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ kubectl port-forward -n monitoring svc/kube-prom-kube-prometheus-prometheus 9090:9090
+```
+открываем http://localhost:9090:
+<img width="1381" height="673" alt="изображение" src="https://github.com/user-attachments/assets/e06d7b3a-5999-401a-b0be-b728c1ed0a54" />
+Проверяем работу Grafana UI:
+запускаем в терминале 
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ kubectl port-forward -n monitoring svc/kube-prom-grafana 3000:80
+```
+открываем http://localhost:3000:
+<img width="1381" height="673" alt="изображение" src="https://github.com/user-attachments/assets/b4ced819-d913-4a7a-b07f-89ea4a12f988" />
+
+Для работы ServiceMonitor создаем в папке templates **servicemonitor.yaml**. <br>
+```Python
+#servicemonitor.yaml
+
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1  #api-версия для ServiceMonitor
+kind: ServiceMonitor
+metadata:
+  name: {{ include "api.fullname" . }}  #совпадает с именем Deployment/Service
+  labels:
+    {{- include "api.labels" . | nindent 4 }}
+    release: kube-prom
+spec:
+  namespaceSelector:
+    matchNames:
+      - default #искать Service в namespace default
+  selector:
+    matchLabels:  #по каким меткам искать Service
+      {{- include "api.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+{{- end }}
+```
+Добавляем в values.yaml:
+```Python
+serviceMonitor:
+  enabled: true
+```
+Обновляем:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ cd ~/itmo-devops-labs/lab2/helm
+helm upgrade api ./api
+Release "api" has been upgraded. Happy Helming!
+NAME: api
+LAST DEPLOYED: Fri Sep 25 14:28:36 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 2 #так как внесли изменения
+```
+Проверяем ServiceMonitor
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ kubectl get servicemonitor -A
+NAMESPACE    NAME                                                AGE
+default      api                                                 79s
+```
+сервис живет.<br>
+
+Смотрим видит Prometheus ли наш ServiceMonitor:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ kubectl get prometheus -n monitoring kube-prom-kube-prometheus-prometheus -o jsonpath='{.spec.serviceMonitorSelector}{"\n"}'
+{}
+```
+пусто => erviceMonitorSelectorNilUsesHelmValues: false сработал, Prometheus берёт все ServiceMonitor
+Открывем Prometheus UI - Status - Targets:
+<img width="1343" height="549" alt="изображение" src="https://github.com/user-attachments/assets/a3785ce6-9ecb-4c3e-be71-a48d4ff0522f" />
+serviceMonitor/default/api/0 - откуда узнал про наш сервис<br>
+State: UP - успешно скрейпит наш сервис
+
 
 ## Часть 2. Логи (Loki + Grafana)
 (заполним позже)
