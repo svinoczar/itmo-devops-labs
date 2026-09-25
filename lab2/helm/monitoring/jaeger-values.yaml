@@ -1,0 +1,5 @@
+jaeger:
+  replicas: 1
+
+  serviceAccount:
+    automountServiceAccountToken: false
