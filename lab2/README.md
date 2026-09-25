@@ -190,3 +190,43 @@ Loki добавлен в существующую Grafana как дополни�
 ```
 
 Работоспособность проверена вызовом `/fail`: в Grafana найдена структурированная запись уровня `ERROR` с полями `route=/fail`, `status_code=500`, `trace_id` и `span_id`.
+
+## Часть 3. Трейсы: OpenTelemetry и Jaeger
+
+Для приёма и просмотра трейсов через Helm развёрнут Jaeger v2 в режиме all-in-one. Collector, memory storage и Query UI работают в одном Pod; это упрощает лабораторную установку, но при перезапуске Jaeger сохранённые трейсы теряются.
+
+```bash
+helm upgrade --install jaeger jaegertracing/jaeger --version 4.14.0 \
+  --namespace monitoring \
+  --values ./lab2/helm/monitoring/jaeger-values.yaml
+```
+
+API инструментирован OpenTelemetry Java Agent. Автоинструментация создаёт серверный span для каждого HTTP-запроса, `/slow` дополнительно создаёт вложенный span `slow-op`, а `/fail` помечает активный span статусом `ERROR`. Экспорт настроен через переменные окружения Helm chart сервиса:
+
+```yaml
+env:
+  - name: OTEL_SERVICE_NAME
+    value: api
+  - name: OTEL_EXPORTER_OTLP_ENDPOINT
+    value: http://jaeger:4318
+  - name: OTEL_EXPORTER_OTLP_PROTOCOL
+    value: http/protobuf
+  - name: OTEL_TRACES_SAMPLER
+    value: always_on
+```
+
+Трейсы передаются по следующему пути:
+
+```text
+API + OpenTelemetry Java Agent → OTLP/HTTP → Jaeger Collector → memory storage → Jaeger UI
+```
+
+Для доступа к интерфейсу используется port-forward:
+
+```bash
+kubectl port-forward -n monitoring svc/jaeger 16686:16686
+```
+
+Проверка выполнена запросами к `/slow` и `/fail`. В waterfall `/slow` виден корневой `GET /slow` и вложенный `slow-op` длительностью 1–3 секунды. Span запроса `/fail` содержит `http.status_code=500`, `error=true` и статус OpenTelemetry `ERROR`, поэтому Jaeger подсвечивает его красным.
+
+Связь логов и трейсов проверена отдельно: полный `trace_id` записи `/fail` скопирован из Loki и найден через `Lookup by Trace ID` в Jaeger. Таким образом, одна операция прослеживается от структурированного лога в Grafana до соответствующего waterfall в Jaeger.
