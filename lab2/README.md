@@ -586,7 +586,70 @@ maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ kubectl get prometheus -n monitor
 Открывем Prometheus UI - Status - Targets:
 <img width="1343" height="549" alt="изображение" src="https://github.com/user-attachments/assets/a3785ce6-9ecb-4c3e-be71-a48d4ff0522f" />
 serviceMonitor/default/api/0 - откуда узнал про наш сервис<br>
-State: UP - успешно скрейпит наш сервис
+State: UP - успешно скрейпит наш сервис<br>
+
+Еще есть картинка:
+<img width="2741" height="1466" alt="изображение" src="https://github.com/user-attachments/assets/a4139af3-4e00-4d06-a4be-92cd8db36fef" />
+Prometheus дергает /metrics, поэтому она подскочила, а остальные 0.
+
+**Делаем дашборд**<br>
+Открываем графану, создаем новый дашборд и добавляем визулизацию.<br>
+**1. Rate**<br>
+В поле для PromQL запроса ввоздим:
+```
+sum by (path) (rate(http_requests_total[5m]))
+```
+выводит количетсво запросов в секунду по каждому пути.
+<img width="1233" height="648" alt="изображение" src="https://github.com/user-attachments/assets/d5d2a51d-3e17-4a8a-a126-04ad65c7441f" />
+сейщас запросов нет, поэтому картинка грустная. <br>
+Создади запросы: в одном терминале
+```
+kubectl port-forward svc/api 5001:5000
+```
+во втором:
+```
+for i in $(seq 1 30); do
+  curl -s localhost:5001/health > /dev/null
+done
+
+for i in $(seq 1 10); do
+  curl -s localhost:5001/fail > /dev/null
+done
+
+for i in $(seq 1 3); do
+  curl -s localhost:5001/slow > /dev/null
+done
+```
+настроим время отображения и видим:
+<img width="1233" height="648" alt="изображение" src="https://github.com/user-attachments/assets/20f81be5-db28-4b76-8d47-fdf07dc5dd2e" />
+график стал поинтереснее.
+
+**2. Errors**<br>
+В поле для PromQL запроса ввоздим:
+```
+sum(rate(http_request_errors_total[5m])) 
+/ 
+sum(rate(http_requests_total[5m]))
+```
+считает долю ошибок от всех запросов.
+
+**3. 95p** <br>
+В поле для PromQL запроса ввоздим:
+```
+histogram_quantile(
+  0.95,
+  sum by (le, path) (
+    rate(http_request_duration_seconds_bucket[5m])
+  )
+)
+```
+считает 95-й % по каждой комбинации.
+
+Еще раз создадти нагрузку и смотрим на панели:
+<img width="2116" height="1039" alt="изображение" src="https://github.com/user-attachments/assets/b4277fec-5b39-43d0-bb55-52a1d8c752dd" />
+Панель Request Rate: подскочили графики всех путей, /metrics стабильны, так как их дергает Prometheus постоянно.<br>
+Панель Error Rate:с 0% до ~20%, так как передали 20 запросов.<br>
+Панель p95 Latency: /slow — подскочил до ~4.4 секунды.
 
 
 ## Часть 2. Логи (Loki + Grafana)
