@@ -10,10 +10,12 @@
 
 ## Часть 0. Сервис api 
 Создаем HTTP сервер с следующей структурой проекта: <br>
-api/ <br>
+```
+api/ 
 ├── app.py             
 ├── requirements.txt   
-└── .venv/              
+└── .venv/
+```
 
 **1. прописываем роуты:** <br>
 GET /health — возвращает ok;<br>
@@ -219,6 +221,230 @@ maria@ubuntu-dev:~/itmo-devops-labs/lab2/api$ minikube image ls | grep api
 registry.k8s.io/kube-apiserver:v1.37.0
 docker.io/library/api:0.1
 ```
+
+**6. Helm** <br>
+Одно из условий лабы - стек на Helm, поэтому упаковываем наш сервис в Helm-чарт(пакет шаблонов для исполнения разных значений).
+
+Создаем структуру проекта:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ cd ~/itmo-devops-labs/lab2/helm
+helm create api
+Creating api
+```
+Теперь у нас создана дерриктория из файлов:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ ls -la api/
+total 32
+drwxr-xr-x 4 maria maria 4096 Sep 25 11:27 .
+drwxrwxr-x 3 maria maria 4096 Sep 25 11:27 ..
+-rw-r--r-- 1 maria maria  349 Sep 25 11:27 .helmignore
+-rw-r--r-- 1 maria maria 1139 Sep 25 11:27 Chart.yaml
+drwxr-xr-x 2 maria maria 4096 Sep 25 11:27 charts
+drwxr-xr-x 3 maria maria 4096 Sep 25 11:27 templates
+-rw-r--r-- 1 maria maria 5249 Sep 25 11:27 values.yaml
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ ls -la api/templates/
+total 44
+drwxr-xr-x 3 maria maria 4096 Sep 25 11:27 .
+drwxr-xr-x 4 maria maria 4096 Sep 25 11:27 ..
+-rw-r--r-- 1 maria maria 2802 Sep 25 11:27 NOTES.txt
+-rw-r--r-- 1 maria maria 1742 Sep 25 11:27 _helpers.tpl
+-rw-r--r-- 1 maria maria 2360 Sep 25 11:27 deployment.yaml
+-rw-r--r-- 1 maria maria  979 Sep 25 11:27 hpa.yaml
+-rw-r--r-- 1 maria maria  945 Sep 25 11:27 httproute.yaml
+-rw-r--r-- 1 maria maria 1076 Sep 25 11:27 ingress.yaml
+-rw-r--r-- 1 maria maria  349 Sep 25 11:27 service.yaml
+-rw-r--r-- 1 maria maria  381 Sep 25 11:27 serviceaccount.yaml
+drwxr-xr-x 2 maria maria 4096 Sep 25 11:27 tests
+```
+не все из которых нам нужны, поэтому после удаления ненужых поучаем следующую картину:
+```
+helm/api/<br>
+├── Chart.yaml         
+├── values.yaml
+└── templates/ 
+  ├── _helpers.tpl
+  ├── deployment.yaml
+  └── service.yaml
+```
+Файлы заполнены по дефолту в соответсвии с шаблонами, сейчас будь править под наш проект.<br>
+
+Настраиваем **Chart.yaml** - паспорт чарта (имя, версия, тип). В дефолтном заполнении не соответсвует только версия app, поэтому меняем ее и получем:
+```
+#Chart.yaml
+
+apiVersion: v2
+name: api
+description: A Helm chart for Kubernetes
+type: application
+version: 0.1.0
+appVersion: "0.1"
+```
+Настраиваем **values.yaml** - дефолтные значения для шаблонов. Сейчас этот файл очень громоздкий. Мы его почистим и оставим:
+```
+#values.yaml
+
+replicaCount: 1  #число копий пода
+
+image:    #какой образ запускать в поде
+  repository: api
+  tag: "0.1"
+  pullPolicy: IfNotPresent  #тянуть образ только если нет локально
+
+service:     #ну тут все понятно
+  type: ClusterIP #доступен только внутри кластера
+  port: 5000
+  targetPort: 5000
+
+env:     #переменные окружения
+  PORT: "5000"
+  SELF_URL: "http://localhost:5000"
+  OTEL_SERVICE_NAME: "api"   #иям в трейсах
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://localhost:4317"   #куда слать спаны
+```
+
+**Настраиваем Deployment** <br>
+Deployment отвечает за то сколько подов создать и за их состоянием: сколько живо, какие воскресить и тд <br>
+**deployment.yaml** <br>
+Для работы пода оставляем только: <br>
+- metadata.name и labels (имя Deployment и метки для гнруппировок)<br>
+- spec.replicas (количество копий пода)<br>
+- spec.selector и spec.template.metadata.labels (какие поды относятся к сервису по меткам)<br>
+- spec.template.spec.containers[] (имя, образ, порт контейнера)<br>
+
+Последние 3 отвечают за желаемое состояние, с которым все время сравнивает кубер текущее состояние сервиса. Получаем файл:
+```
+#deployment.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "api.fullname" . }}
+  labels:
+    {{- include "api.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "api.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "api.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: api
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.targetPort }}
+              protocol: TCP
+          env:
+            {{- range $key, $val := .Values.env }}
+            - name: {{ $key }}
+              value: {{ $val | quote }}
+            {{- end }}****
+```
+
+**Настраиваем Service**<br>
+Service отвечает за стабильность доступа к подам. Так как айпишники контейнеров все время меняются, он дает им DNS-имена и направляет трафик на живые поды.<br>
+**service.yaml** <br>
+Файл сервича оставляем без изменений:
+```
+#service.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "api.fullname" . }}
+  labels:
+    {{- include "api.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "api.selectorLabels" . | nindent 4 }}
+```
+Деплоим в кластер:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ helm install api ./api
+NAME: api
+LAST DEPLOYED: Fri Sep 25 12:16:25 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 1
+TEST SUITE: None
+```
+Просматриваем экземпляров чарта в namespace:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ helm list
+NAME	NAMESPACE	REVISION	UPDATED                                	STATUS  	CHART    	APP VERSION
+api 	default  	1       	2026-09-25 12:16:25.748246738 +0300 MSK	deployed	api-0.1.0	0.1        
+```
+установлен.<br>
+
+Проверям:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ helm list 
+NAME	NAMESPACE	REVISION	UPDATED                                	STATUS  	CHART    	APP VERSION
+api 	default  	1       	2026-09-25 12:16:25.748246738 +0300 MSK	deployed	api-0.1.0	0.1        
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ kubectl get pods 
+NAME                   READY   STATUS    RESTARTS   AGE
+api-598b897dd7-xvmfr   1/1     Running   0          4m48s
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ kubectl get svc
+NAME         TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)    AGE
+api          ClusterIP   10.103.151.249   <none>        5000/TCP   5m9s
+kubernetes   ClusterIP   10.96.0.1        <none>        443/TCP    2d18h
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ kubectl get deploy
+NAME   READY   UP-TO-DATE   AVAILABLE   AGE
+api    1/1     1            1           5m24s
+```
+видим, что релиз установлен, под работает, сервис создан и слушает порт внутри кластера, деплоймент создан и реплика 1.
+
+Проверяем работоспособность.<br>
+В одном терминале:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ kubectl port-forward svc/api 5001:5000
+Forwarding from 127.0.0.1:5001 -> 5000
+Forwarding from [::1]:5001 -> 5000
+Handling connection for 5001
+Handling connection for 5001
+Handling connection for 5001
+Handling connection for 5001
+```
+Во втором:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ curl -i localhost:5001/health
+curl -i localhost:5001/fail
+time curl localhost:5001/slow
+curl -s localhost:5001/metrics | grep '^http_requests_total'
+HTTP/1.1 200 OK
+Server: Werkzeug/3.1.8 Python/3.12.14
+Date: Fri, 25 Sep 2026 09:30:24 GMT
+Content-Type: text/html; charset=utf-8
+Content-Length: 2
+Connection: close
+
+HTTP/1.1 500 INTERNAL SERVER ERROR
+Server: Werkzeug/3.1.8 Python/3.12.14
+Date: Fri, 25 Sep 2026 09:30:24 GMT
+Content-Type: text/html; charset=utf-8
+Content-Length: 17
+Connection: close
+
+slept 1.92failure
+real	0m1.942s
+user	0m0.004s
+sys	0m0.011s
+http_requests_total{method="GET",path="/health",status="200"} 1.0
+http_requests_total{method="GET",path="/fail",status="500"} 1.0
+http_requests_total{method="GET",path="/slow",status="200"} 1.0
+```
+Сервис работает через кубер. Ура спасибо.
 
 
 ## Часть 1. Метрики (Prometheus + Grafana)
