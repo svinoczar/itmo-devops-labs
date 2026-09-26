@@ -182,3 +182,9 @@ env:
 
   - name: OTEL_TRACES_SAMPLER
     value: always_on
+
+prometheusRule:
+  enabled: true
+  for: 2m
+  errorRateThreshold: 0.2
+  latencyThresholdSeconds: 1
