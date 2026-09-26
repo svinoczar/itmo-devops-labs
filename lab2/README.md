@@ -230,3 +230,50 @@ kubectl port-forward -n monitoring svc/jaeger 16686:16686
 Проверка выполнена запросами к `/slow` и `/fail`. В waterfall `/slow` виден корневой `GET /slow` и вложенный `slow-op` длительностью 1–3 секунды. Span запроса `/fail` содержит `http.status_code=500`, `error=true` и статус OpenTelemetry `ERROR`, поэтому Jaeger подсвечивает его красным.
 
 Связь логов и трейсов проверена отдельно: полный `trace_id` записи `/fail` скопирован из Loki и найден через `Lookup by Trace ID` в Jaeger. Таким образом, одна операция прослеживается от структурированного лога в Grafana до соответствующего waterfall в Jaeger.
+
+## Часть 4. Алертинг: Prometheus, Alertmanager и Karma
+
+В Helm chart API добавлен объект `PrometheusRule` с label `release: monitoring`, по которому Prometheus Operator подключает правила к экземпляру Prometheus из `kube-prometheus-stack`. Настроены три алерта:
+
+- `ApiUnavailable` — target API недоступен или полностью исчез из service discovery;
+- `ApiHighErrorRate` — доля ошибок превышает 20%;
+- `ApiHighP95Latency` — p95 времени ответа превышает одну секунду.
+
+Каждое условие должно выполняться непрерывно две минуты (`for: 2m`). До истечения этого времени алерт находится в состоянии `pending`, после — в `firing`. Такая задержка не позволяет кратковременному сбою сразу породить уведомление.
+
+Недоступность API проверяется двумя вариантами отказа:
+
+```promql
+(up{job="api"} == 0)
+or absent(up{job="api"})
+```
+
+Первая ветка срабатывает, когда target найден, но scrape завершается ошибкой. `absent()` покрывает случай, когда после удаления всех Pod у Service не осталось endpoints и временной ряд `up` полностью исчез.
+
+Alertmanager получает сработавшие алерты от Prometheus, группирует их по `alertname` и `service`, а критические алерты API отправляет в тестовый webhook `alert-receiver`. Параметр `send_resolved: true` включает отдельное уведомление после устранения проблемы:
+
+```text
+PrometheusRule → Prometheus → Alertmanager → webhook
+                                  ↓
+                                Karma
+```
+
+Для просмотра и фильтрации алертов установлен Karma. Он подключается непосредственно к API Alertmanager в режиме `read-only`, поэтому отображает группы, labels и состояния алертов, но не изменяет silences.
+
+```bash
+helm upgrade --install karma ./lab2/helm/karma --namespace monitoring
+kubectl port-forward -n monitoring svc/karma 8081:8080
+```
+
+Проверка недоступности выполнена масштабированием API до нуля:
+
+```bash
+kubectl scale deployment/api -n monitoring --replicas=0
+```
+
+После двух минут `ApiUnavailable` перешёл в `firing`, появился в Alertmanager и Karma, а webhook получил уведомление. После восстановления API алерт перешёл в `resolved`:
+
+```bash
+kubectl scale deployment/api -n monitoring --replicas=1
+kubectl rollout status deployment/api -n monitoring
+```
