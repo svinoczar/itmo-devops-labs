@@ -1,0 +1,1081 @@
+# Лабораторная работа №2: мониторинг сервиса в Kubernetes
+
+## Окружение
+- Ubuntu 26.04 LTS, 14 CPU, 30 GB RAM
+- Docker Engine 29.8.0
+- kubectl v1.31.14
+- minikube v1.39.0 (driver: docker, 4 CPU, 8 GB RAM), Kubernetes v1.37.0
+- Helm v3.22.0
+- Python 3.14.4<br>
+<br>
+
+## Быстрые комады 
+
+**Сервис api** http://localhost:5001<br>
+```
+kubectl port-forward svc/api 5001:5000
+```
+
+**Prometheus** http://localhost:9090<br>
+```
+kubectl port-forward -n monitoring svc/kube-prom-kube-prometheus-prometheus 9090:9090
+```
+
+**Grafana** http://localhost:3000<br>
+```
+kubectl port-forward -n monitoring svc/kube-prom-grafana 3000:80
+```
+
+**Jaeger** http://localhost:16686<br>
+```
+kubectl port-forward -n monitoring svc/jaeger 16686:16686
+```
+
+**Alertmanager** http://localhost:9093<br>
+```
+kubectl port-forward -n monitoring svc/kube-prom-kube-prometheus-alertmanager 9093:9093
+```
+
+**Karma** http://localhost:8080<br>
+```
+kubectl port-forward -n monitoring svc/karma 8080:8080
+```
+
+## Часть 0. Сервис api 
+Создаем HTTP сервер с следующей структурой проекта: <br>
+```
+api/ 
+├── app.py             
+├── requirements.txt   
+└── .venv/
+```
+
+**1. прописываем роуты:** <br>
+GET /health — возвращает ok;<br>
+GET /fail — возвращает ошибку 5xx и увеличивает счётчик ошибок;<br>
+GET /slow — отвечает медленно (спит 1–3 секунды);<br>
+GET /load — делает пачку запросов к себе, чтобы подскочил RPS.<br>
+(прописываем хуки Flask для работы функций)
+
+**2. прописываем метрики:** <br>
+счётчик запросов,<br>
+счётчик ошибок,<br>
+гистограмму времени ответа (RED);<br>
+
+Запускаем локально:
+```
+cd api
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python app.py
+```
+
+Ответ /health:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/api$ curl -i localhost:5000/health
+HTTP/1.1 200 OK
+Server: Werkzeug/3.1.8 Python/3.14.4
+Date: Tue, 22 Sep 2026 17:44:46 GMT
+Content-Type: text/html; charset=utf-8
+Content-Length: 2
+Connection: close
+
+ok
+```
+Сервер жив - ответ ok
+
+Ответ /fail:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/api$ curl -i localhost:5000/fail
+HTTP/1.1 500 INTERNAL SERVER ERROR
+Server: Werkzeug/3.1.8 Python/3.14.4
+Date: Tue, 22 Sep 2026 17:44:50 GMT
+Content-Type: text/html; charset=utf-8
+Content-Length: 17
+Connection: close
+
+simulated failure
+```
+Функция возвращает ошибку 500 - счетчик видит, что ошибка серверная и инкрементируется.
+
+Ответ /slow:
+```
+simulated failuremaria@ubuntu-dev:~/itmo-devops-labs/lab2/api$ time curl localhost:5000/slow
+slept 1.70
+real	0m1.722s
+user	0m0.008s
+sys	0m0.009s
+```
+-real — реальное время <br>
+-user/sys — процессорное время <br>
+у них маленькие значения, потому что сервер sleep
+
+Ответ /load:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/api$ time curl 'localhost:5000/load?count=10'
+fired 10 requests
+real	0m7.454s
+user	0m0.008s
+sys	0m0.009s
+```
+Функция делает заданное количество запросов на другие адреса => подскакивает время.
+
+Ответ /metrics:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/api$ curl -s localhost:5000/metrics | grep -E '^http_(requests|request_errors)'
+http_requests_total{method="GET",path="/fail",status="500"} 8.0
+http_requests_total{method="GET",path="/slow",status="200"} 8.0
+http_requests_total{method="GET",path="/health",status="200"} 9.0
+http_requests_total{method="GET",path="/load",status="200"} 2.0
+http_requests_total{method="GET",path="/metrics",status="200"} 1.0
+http_requests_created{method="GET",path="/fail",status="500"} 1.7900983969137557e+09
+http_requests_created{method="GET",path="/slow",status="200"} 1.790098398648161e+09
+http_requests_created{method="GET",path="/health",status="200"} 1.7900983987234986e+09
+http_requests_created{method="GET",path="/load",status="200"} 1.7900984054311123e+09
+http_requests_created{method="GET",path="/metrics",status="200"} 1.790099301891964e+09
+http_request_errors_total{method="GET",path="/fail"} 8.0
+http_request_errors_created{method="GET",path="/fail"} 1.7900983969137971e+09
+```
+Видим количество запросов к каждому адресу, сделанное к этому моменту. Метку ошибки только у /fail запросов (8 запросов = 8 ошибок). <br>
+/metrics считает сама себя, так как тоже является запросом
+
+**3. устанавливаем зависимости для работы OpenTelemetry и JSON-логов**<br>
+Зависимости:
+```Python
+(.venv) maria@ubuntu-dev:~/itmo-devops-labs/lab2/api$ pip install \
+  opentelemetry-distro \
+  opentelemetry-exporter-otlp \
+  opentelemetry-instrumentation-flask
+```
+и импорты их в app.py.
+
+Прописываем провайдер и экспортер:
+```Python
+resource = Resource.create({"service.name": os.getenv("OTEL_SERVICE_NAME", "api")})
+provider = TracerProvider(resource=resource)
+otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+provider.add_span_processor(
+    BatchSpanProcessor(OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True))
+)
+trace.set_tracer_provider(provider) #делаем глобальным
+tracer = trace.get_tracer("api") #трейсер для создания своих спанов
+```
+Resource.create - имя сервиса в Jaeger <br>
+endpoint - адрес OTLP-приёмника (пропишем в части 3)
+
+Прописываем логгеры:
+```Python
+class JsonFormatter(logging.Formatter):
+    def format(self, record):
+        span = trace.get_current_span() #узнает активный спан
+        ctx = span.get_span_context() if span else None
+        trace_id = format(ctx.trace_id, "032x") if ctx and ctx.trace_id else ""
+        payload = { 
+            ""ts": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "level": record.levelname, #уровень для фильтрации
+            "msg": record.getMessage(), #итоговое сообщение
+            "logger": record.name,
+            "trace_id": trace_id,
+        }
+        if record.exc_info:
+            payload["exc"] = self.formatException(record.exc_info)
+        return json.dumps(payload, ensure_ascii=False)
+
+
+handler = logging.StreamHandler(sys.stdout) #пишет в stdout, оттуда уходит в Loki
+handler.setFormatter(JsonFormatter())
+log = logging.getLogger("api")
+log.setLevel(logging.INFO)
+log.handlers = [handler]
+log.propagate = False #не дублирует в родительский логер
+```
+format(record) - получает одну запись лога и возвращает строку, которая уйдёт в вывод <br>
+```Python
+FlaskInstrumentor().instrument_app(app) #создает корневой спан
+```
+
+**4. прописываем логи** <br>
+/health:
+```Python
+log.info("health check")
+```
+/fail:
+```Python
+span = trace.get_current_span()
+span.set_status(trace.Status(trace.StatusCode.ERROR, "simulated failure")) #подсветится красным
+span.set_attribute("error", True) #тег для отображения ошибки
+log.error("simulated failure on /fail")
+```
+/slow:
+```Python
+with tracer.start_as_current_span("slow-op") as sp: #создаем вложенный спан и открываем про входе
+  sp.set_attribute("delay.seconds", delay) #закрепляем значение за спаном
+  log.info(f"slow op start delay={delay:.2f}") 
+  time.sleep(delay)
+log.info("slow op done")
+```
+/load:
+```Python
+log.info(f"load fired {count} requests")
+```
+
+Тестируем (запускаем сервер и вызываем /health, /fail, /slow) и видим в выводе JSON:
+```
+{"ts": "2026-09-23T12:54:41.%fZ", "level": "INFO", "msg": "health check", "logger": "api", "trace_id": "5ce0051037278d8e31143890fa6a1c1c"}
+
+{"ts": "2026-09-23T12:54:41.%fZ", "level": "ERROR", "msg": "simulated failure on /fail", "logger": "api", "trace_id": "af116e9427667bcc4b8444baebb75878"}
+
+{"ts": "2026-09-23T12:54:41.%fZ", "level": "INFO", "msg": "slow op start num=1.71", "logger": "api", "trace_id": "e988c8fd654ba9072ab2784423810af6"}
+
+{"ts": "2026-09-23T12:54:42.%fZ", "level": "INFO", "msg": "slow op done", "logger": "api", "trace_id": "e988c8fd654ba9072ab2784423810af6"}
+```
+у каждого запроса свой id, кроме логов slow, у них одинаковый.
+
+**5.Dockerfile**<br>
+Так как в кубере все работает как контенер, необходимо наш серсер прописать в контейнер.
+Прописываем Dockerfile и собираем:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/api$ docker images | grep api
+api:0.1                                                                                               2f3e0527d9a5        250MB         60.4MB     
+```
+образ успешно собран.<br>
+Работает:
+```
+http_requests_total{method="GET",path="/health",status="200"} 1.0
+http_requests_total{method="GET",path="/fail",status="500"} 1.0
+http_requests_total{method="GET",path="/slow",status="200"} 1.0
+```
+
+Загружаем в minikube, чтобы он увидел образ:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/api$ minikube image load api:0.1
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/api$ minikube image ls | grep api
+registry.k8s.io/kube-apiserver:v1.37.0
+docker.io/library/api:0.1
+```
+
+**6. Helm** <br>
+Одно из условий лабы - стек на Helm, поэтому упаковываем наш сервис в Helm-чарт(пакет шаблонов для исполнения разных значений).
+
+Создаем структуру проекта:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ cd ~/itmo-devops-labs/lab2/helm
+helm create api
+Creating api
+```
+Теперь у нас создана дерриктория из файлов:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ ls -la api/
+total 32
+drwxr-xr-x 4 maria maria 4096 Sep 25 11:27 .
+drwxrwxr-x 3 maria maria 4096 Sep 25 11:27 ..
+-rw-r--r-- 1 maria maria  349 Sep 25 11:27 .helmignore
+-rw-r--r-- 1 maria maria 1139 Sep 25 11:27 Chart.yaml
+drwxr-xr-x 2 maria maria 4096 Sep 25 11:27 charts
+drwxr-xr-x 3 maria maria 4096 Sep 25 11:27 templates
+-rw-r--r-- 1 maria maria 5249 Sep 25 11:27 values.yaml
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ ls -la api/templates/
+total 44
+drwxr-xr-x 3 maria maria 4096 Sep 25 11:27 .
+drwxr-xr-x 4 maria maria 4096 Sep 25 11:27 ..
+-rw-r--r-- 1 maria maria 2802 Sep 25 11:27 NOTES.txt
+-rw-r--r-- 1 maria maria 1742 Sep 25 11:27 _helpers.tpl
+-rw-r--r-- 1 maria maria 2360 Sep 25 11:27 deployment.yaml
+-rw-r--r-- 1 maria maria  979 Sep 25 11:27 hpa.yaml
+-rw-r--r-- 1 maria maria  945 Sep 25 11:27 httproute.yaml
+-rw-r--r-- 1 maria maria 1076 Sep 25 11:27 ingress.yaml
+-rw-r--r-- 1 maria maria  349 Sep 25 11:27 service.yaml
+-rw-r--r-- 1 maria maria  381 Sep 25 11:27 serviceaccount.yaml
+drwxr-xr-x 2 maria maria 4096 Sep 25 11:27 tests
+```
+не все из которых нам нужны, поэтому после удаления ненужых поучаем следующую картину:
+```
+helm/api/<br>
+├── Chart.yaml         
+├── values.yaml
+└── templates/ 
+  ├── _helpers.tpl
+  ├── deployment.yaml
+  └── service.yaml
+```
+Файлы заполнены по дефолту в соответсвии с шаблонами, сейчас будь править под наш проект.<br>
+
+Настраиваем **Chart.yaml** - паспорт чарта (имя, версия, тип). В дефолтном заполнении не соответсвует только версия app, поэтому меняем ее и получем:
+```Python
+#Chart.yaml
+
+apiVersion: v2
+name: api
+description: A Helm chart for Kubernetes
+type: application
+version: 0.1.0
+appVersion: "0.1"
+```
+Настраиваем **values.yaml** - дефолтные значения для шаблонов. Сейчас этот файл очень громоздкий. Мы его почистим и оставим:
+```Python
+#values.yaml
+
+replicaCount: 1  #число копий пода
+
+image:    #какой образ запускать в поде
+  repository: api
+  tag: "0.1"
+  pullPolicy: IfNotPresent  #тянуть образ только если нет локально
+
+service:     #ну тут все понятно
+  type: ClusterIP #доступен только внутри кластера
+  port: 5000
+  targetPort: 5000
+
+env:     #переменные окружения
+  PORT: "5000"
+  SELF_URL: "http://localhost:5000"
+  OTEL_SERVICE_NAME: "api"   #иям в трейсах
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://localhost:4317"   #куда слать спаны
+```
+
+**Настраиваем Deployment** <br>
+Deployment отвечает за то сколько подов создать и за их состоянием: сколько живо, какие воскресить и тд <br>
+**deployment.yaml** <br>
+Для работы пода оставляем только: <br>
+- metadata.name и labels (имя Deployment и метки для гнруппировок)<br>
+- spec.replicas (количество копий пода)<br>
+- spec.selector и spec.template.metadata.labels (какие поды относятся к сервису по меткам)<br>
+- spec.template.spec.containers[] (имя, образ, порт контейнера)<br>
+
+Последние 3 отвечают за желаемое состояние, с которым все время сравнивает кубер текущее состояние сервиса. Получаем файл:
+```Python
+#deployment.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "api.fullname" . }}
+  labels:
+    {{- include "api.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "api.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "api.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: api
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.targetPort }}
+              protocol: TCP
+          env:
+            {{- range $key, $val := .Values.env }}
+            - name: {{ $key }}
+              value: {{ $val | quote }}
+            {{- end }}****
+```
+
+**Настраиваем Service**<br>
+Service отвечает за стабильность доступа к подам. Так как айпишники контейнеров все время меняются, он дает им DNS-имена и направляет трафик на живые поды.<br>
+**service.yaml** <br>
+Файл сервича оставляем без изменений:
+```Python
+#service.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "api.fullname" . }}
+  labels:
+    {{- include "api.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "api.selectorLabels" . | nindent 4 }}
+```
+Деплоим в кластер:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ helm install api ./api
+NAME: api
+LAST DEPLOYED: Fri Sep 25 12:16:25 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 1
+TEST SUITE: None
+```
+Просматриваем экземпляров чарта в namespace:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ helm list
+NAME	NAMESPACE	REVISION	UPDATED                                	STATUS  	CHART    	APP VERSION
+api 	default  	1       	2026-09-25 12:16:25.748246738 +0300 MSK	deployed	api-0.1.0	0.1        
+```
+установлен.<br>
+
+Проверям:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ helm list 
+NAME	NAMESPACE	REVISION	UPDATED                                	STATUS  	CHART    	APP VERSION
+api 	default  	1       	2026-09-25 12:16:25.748246738 +0300 MSK	deployed	api-0.1.0	0.1        
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ kubectl get pods 
+NAME                   READY   STATUS    RESTARTS   AGE
+api-598b897dd7-xvmfr   1/1     Running   0          4m48s
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ kubectl get svc
+NAME         TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)    AGE
+api          ClusterIP   10.103.151.249   <none>        5000/TCP   5m9s
+kubernetes   ClusterIP   10.96.0.1        <none>        443/TCP    2d18h
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ kubectl get deploy
+NAME   READY   UP-TO-DATE   AVAILABLE   AGE
+api    1/1     1            1           5m24s
+```
+видим, что релиз установлен, под работает, сервис создан и слушает порт внутри кластера, деплоймент создан и реплика 1.
+
+Проверяем работоспособность.<br>
+В одном терминале:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ kubectl port-forward svc/api 5001:5000
+Forwarding from 127.0.0.1:5001 -> 5000
+Forwarding from [::1]:5001 -> 5000
+Handling connection for 5001
+Handling connection for 5001
+Handling connection for 5001
+Handling connection for 5001
+```
+Во втором:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ curl -i localhost:5001/health
+curl -i localhost:5001/fail
+time curl localhost:5001/slow
+curl -s localhost:5001/metrics | grep '^http_requests_total'
+HTTP/1.1 200 OK
+Server: Werkzeug/3.1.8 Python/3.12.14
+Date: Fri, 25 Sep 2026 09:30:24 GMT
+Content-Type: text/html; charset=utf-8
+Content-Length: 2
+Connection: close
+
+HTTP/1.1 500 INTERNAL SERVER ERROR
+Server: Werkzeug/3.1.8 Python/3.12.14
+Date: Fri, 25 Sep 2026 09:30:24 GMT
+Content-Type: text/html; charset=utf-8
+Content-Length: 17
+Connection: close
+
+slept 1.92failure
+real	0m1.942s
+user	0m0.004s
+sys	0m0.011s
+http_requests_total{method="GET",path="/health",status="200"} 1.0
+http_requests_total{method="GET",path="/fail",status="500"} 1.0
+http_requests_total{method="GET",path="/slow",status="200"} 1.0
+```
+Сервис работает через кубер. Ура спасибо.
+
+
+## Часть 1.Prometheus + Grafana
+Prometheus - база данныхз для метрик. <br>
+Для реализации этой части задания мы будем использовать готовый Helm-чарт: kube-prometheus-stack. <br>
+Он ставит сразу:
+- Prometheus (сбор метрик) <br>
+- Alertmanager (приём и рассылка алертов) <br>
+- Grafana(визуализаци) <br>
+- node-exporter (экспортёр метрик ноды) <br>
+- kube-state-metrics (экспортёр метрик K8s-объектов) <br>
+  
+Дакавать команду о скрепинге мы будем через ServiceMonitor, чтобы не править конфиг файл вручну.
+
+Добавляем репозиторий:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2$ helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+"prometheus-community" has been added to your repositories
+Hang tight while we grab the latest from your chart repositories...
+...Successfully got an update from the "prometheus-community" chart repository
+Update Complete. ⎈Happy Helming!⎈
+```
+Создаем **values.yaml** с настройками для чарта в папке monitoring.<br>
+В нем прописывается prometheus, настройка для ServiceMonitor, данные для grafana, alertmanager.
+
+Устанавливаем kube-prometheus-stack:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ helm install kube-prom prometheus-community/kube-prometheus-stack \
+  --namespace monitoring \
+  --create-namespace \
+  -f kube-prometheus-stack-values.yaml
+NAME: kube-prom
+LAST DEPLOYED: Fri Sep 25 13:56:02 2026
+NAMESPACE: monitoring
+STATUS: deployed
+REVISION: 1
+```
+установился, проверяем установку подов:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ kubectl get pods -n monitoring
+NAME                                                    READY   STATUS    RESTARTS   AGE
+alertmanager-kube-prom-kube-prometheus-alertmanager-0   2/2     Running   0          7m57s
+kube-prom-grafana-7dbdf8d889-q9v2c                      3/3     Running   0          8m3s
+kube-prom-kube-prometheus-operator-68764fddf6-r8qxj     1/1     Running   0          8m3s
+kube-prom-kube-state-metrics-58fb46f59-bb5bb            1/1     Running   0          8m3s
+kube-prom-prometheus-node-exporter-wnvjx                1/1     Running   0          8m3s
+prometheus-kube-prom-kube-prometheus-prometheus-0       2/2     Running   0          7m57s
+```
+- 2 alertmanager: сам alertmanager и config-reloader (следит за изменениями конфига Alertmanager)  <br>
+- 3 grafana: сама grafana, grafana-sc-dashboard (подхватывает новые дашборды), grafana-sc-datasources (отвечает за подключение к Prometheus)  <br>
+- 1 prometheus-operator: сам оператор    <br>
+- 2 prometheus-prometheus: сам prometheus и config-reloader (перезагружает конфиг Prometheus)  <br>
+
+Проверяем сервисы в namespace:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ kubectl get svc -n monitoring
+NAME                                     TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)                      AGE
+alertmanager-operated                    ClusterIP   None             <none>        9093/TCP,9094/TCP,9094/UDP   9m36s
+kube-prom-grafana                        ClusterIP   10.109.128.238   <none>        80/TCP                       9m42s
+kube-prom-kube-prometheus-alertmanager   ClusterIP   10.100.193.40    <none>        9093/TCP,8080/TCP            9m42s
+kube-prom-kube-prometheus-operator       ClusterIP   10.97.70.235     <none>        443/TCP                      9m42s
+kube-prom-kube-prometheus-prometheus     ClusterIP   10.103.62.166    <none>        9090/TCP,8080/TCP            9m42s
+kube-prom-kube-state-metrics             ClusterIP   10.107.5.75      <none>        8080/TCP                     9m42s
+kube-prom-prometheus-node-exporter       ClusterIP   10.99.140.190    <none>        9100/TCP                     9m42s
+prometheus-operated                      ClusterIP   None             <none>        9090/TCP                     9m36s
+```
+
+Проверяем работу Prometheus UI:
+запускаем в терминале 
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ kubectl port-forward -n monitoring svc/kube-prom-kube-prometheus-prometheus 9090:9090
+```
+открываем http://localhost:9090:
+<img width="1381" height="673" alt="изображение" src="https://github.com/user-attachments/assets/e06d7b3a-5999-401a-b0be-b728c1ed0a54" />
+Проверяем работу Grafana UI:
+запускаем в терминале 
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ kubectl port-forward -n monitoring svc/kube-prom-grafana 3000:80
+```
+открываем http://localhost:3000:
+<img width="1381" height="673" alt="изображение" src="https://github.com/user-attachments/assets/b4ced819-d913-4a7a-b07f-89ea4a12f988" />
+
+Для работы ServiceMonitor создаем в папке templates **servicemonitor.yaml**. <br>
+```Python
+#servicemonitor.yaml
+
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1  #api-версия для ServiceMonitor
+kind: ServiceMonitor
+metadata:
+  name: {{ include "api.fullname" . }}  #совпадает с именем Deployment/Service
+  labels:
+    {{- include "api.labels" . | nindent 4 }}
+    release: kube-prom
+spec:
+  namespaceSelector:
+    matchNames:
+      - default #искать Service в namespace default
+  selector:
+    matchLabels:  #по каким меткам искать Service
+      {{- include "api.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+{{- end }}
+```
+Добавляем в values.yaml:
+```Python
+serviceMonitor:
+  enabled: true
+```
+Обновляем:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ cd ~/itmo-devops-labs/lab2/helm
+helm upgrade api ./api
+Release "api" has been upgraded. Happy Helming!
+NAME: api
+LAST DEPLOYED: Fri Sep 25 14:28:36 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 2 #так как внесли изменения
+```
+Проверяем ServiceMonitor
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ kubectl get servicemonitor -A
+NAMESPACE    NAME                                                AGE
+default      api                                                 79s
+```
+сервис живет.<br>
+
+Смотрим видит Prometheus ли наш ServiceMonitor:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ kubectl get prometheus -n monitoring kube-prom-kube-prometheus-prometheus -o jsonpath='{.spec.serviceMonitorSelector}{"\n"}'
+{}
+```
+пусто => erviceMonitorSelectorNilUsesHelmValues: false сработал, Prometheus берёт все ServiceMonitor
+Открывем Prometheus UI - Status - Targets:
+<img width="1343" height="549" alt="изображение" src="https://github.com/user-attachments/assets/a3785ce6-9ecb-4c3e-be71-a48d4ff0522f" />
+serviceMonitor/default/api/0 - откуда узнал про наш сервис<br>
+State: UP - успешно скрейпит наш сервис<br>
+
+Еще есть картинка:
+<img width="2741" height="1466" alt="изображение" src="https://github.com/user-attachments/assets/a4139af3-4e00-4d06-a4be-92cd8db36fef" />
+Prometheus дергает /metrics, поэтому она подскочила, а остальные 0.
+
+**Делаем дашборд**<br>
+Открываем графану, создаем новый дашборд и добавляем визулизацию.<br>
+**1. Rate**<br>
+В поле для PromQL запроса ввоздим:
+```
+sum by (path) (rate(http_requests_total[5m]))
+```
+выводит количетсво запросов в секунду по каждому пути.
+<img width="1233" height="648" alt="изображение" src="https://github.com/user-attachments/assets/d5d2a51d-3e17-4a8a-a126-04ad65c7441f" />
+сейщас запросов нет, поэтому картинка грустная. <br>
+Создади запросы: в одном терминале
+```
+kubectl port-forward svc/api 5001:5000
+```
+во втором:
+```
+for i in $(seq 1 30); do
+  curl -s localhost:5001/health > /dev/null
+done
+
+for i in $(seq 1 10); do
+  curl -s localhost:5001/fail > /dev/null
+done
+
+for i in $(seq 1 3); do
+  curl -s localhost:5001/slow > /dev/null
+done
+```
+настроим время отображения и видим:
+<img width="1233" height="648" alt="изображение" src="https://github.com/user-attachments/assets/20f81be5-db28-4b76-8d47-fdf07dc5dd2e" />
+график стал поинтереснее.
+
+**2. Errors**<br>
+В поле для PromQL запроса ввоздим:
+```
+sum(rate(http_request_errors_total[5m])) 
+/ 
+sum(rate(http_requests_total[5m]))
+```
+считает долю ошибок от всех запросов.
+
+**3. 95p** <br>
+В поле для PromQL запроса ввоздим:
+```
+histogram_quantile(
+  0.95,
+  sum by (le, path) (
+    rate(http_request_duration_seconds_bucket[5m])
+  )
+)
+```
+считает 95-й % по каждой комбинации.
+
+Еще раз создадти нагрузку и смотрим на панели:
+<img width="2116" height="1039" alt="изображение" src="https://github.com/user-attachments/assets/b4277fec-5b39-43d0-bb55-52a1d8c752dd" />
+Панель Request Rate: подскочили графики всех путей, /metrics стабильны, так как их дергает Prometheus постоянно.<br>
+Панель Error Rate:с 0% до ~20%, так как передали 20 запросов.<br>
+Панель p95 Latency: /slow — подскочил до ~4.4 секунды.
+
+
+## Часть 2. Loki + Grafana
+Loki - база данных для хоранения логов.<br>
+Подключаем репозитории Helm:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2$ helm repo add grafana https://grafana.github.io/helm-charts
+helm repo update
+helm search repo loki
+```
+Создаем yaml файл для loki:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2$ cd ~/itmo-devops-labs/lab2/helm/monitoring
+touch loki-stack-values.yaml
+```
+Прописываем:<br>
+retention_period: 168h — хранить логи 7 дней<br>
+loki.enabled: true<br>
+grafana.enabled: false — уже есть<br>
+prometheus.enabled: false — уже есть<br>
+persistence.enabled: false — логи в emptyDir<br>
+
+Проверяем на валибность:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ cd ~/itmo-devops-labs/lab2/helm/monitoring
+wc -l loki-stack-values.yaml
+python3 -c "import yaml; yaml.safe_load(open('loki-stack-values.yaml')); print('YAML valid')"
+52 loki-stack-values.yaml
+YAML valid
+```
+Рендерим:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ helm template loki grafana/loki-stack \
+  --namespace monitoring \
+  -f loki-stack-values.yaml \
+  > /tmp/loki-rendered.yaml
+
+wc -l /tmp/loki-rendered.yaml
+grep -E '^kind: ' /tmp/loki-rendered.yaml | sort | uniq -c
+WARNING: This chart is deprecated
+607 /tmp/loki-rendered.yaml
+1 kind: DaemonSet         #Promtail (агент на каждой ноде)
+1 kind: StatefulSet       #Loki (хранилище)
+3 kind: Service           #сетевые доступы
+2 kind: ConfigMap         #конфиги Loki и Promtail
+2 kind: Secret            #пароли
+1 kind: Pod               #тестовый под 
+1 kind: ClusterRole       #для чтения метаданных подов
+1 kind: ClusterRoleBinding  
+2 kind: ServiceAccount    #учетная запись внутри кубера
+1 kind: Role              #набор разрещений внутри namespace
+1 kind: RoleBinding
+```
+все ок, ставим.
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ helm install loki grafana/loki-stack \
+  --namespace monitoring \
+  -f loki-stack-values.yaml
+WARNING: This chart is deprecated
+NAME: loki
+LAST DEPLOYED: Mon Sep 28 12:50:28 2026
+NAMESPACE: monitoring
+STATUS: deployed
+REVISION: 1
+```
+Смотрим поды:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2$ kubectl get pods -n monitoring | grep -E 'loki|promtail'
+loki-0                                                  1/1     Running   0          3m37s
+loki-promtail-8k6nn                                     1/1     Running   0          3m37s
+```
+loki-0 - сам локи <br>
+loki-promtail-8k6nn - под внутри <br>
+
+Подключаем к Grafana.
+Смотрим порт локи:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2$ kubectl get svc -n monitoring | grep loki
+loki                                     ClusterIP   10.107.209.20    <none>        3100/TCP                     12m
+loki-headless                            ClusterIP   None             <none>        3100/TCP                     12m
+```
+В grafanа добавляем локи и вводим http://loki:3100.<br>
+Видим наши логи:
+<img width="1281" height="1436" alt="изображение" src="https://github.com/user-attachments/assets/f6d7ac86-8ac7-47fe-9f4d-630bf9b64545" />
+Ищем логи /fail. 
+Вызовем через терминал:
+```
+curl -i localhost:5001/fail
+```
+Вводим в Grafana {namespace="default"} |= "simulated failure" в Query поле:
+<img width="1184" height="393" alt="изображение" src="https://github.com/user-attachments/assets/6c6ee122-febd-45d2-96d7-41394f3d229c" />
+
+## Часть 3. OpenTelemetry + Jaeger
+Так как зависимости в сервер мы уже добавили, прописали корневой спан, вложенный спан для /slow, error-статус /fail, а также экспортер. <br>
+Но спаны никуда сейчас не экмпортируются, поэтому нужнор настроить Jaeger - приемник ( для хранения и визуализации трейсов).<br>
+Для реализации будем использовать принцип all-in-one - всё в одном процессе: и прием спанов, и бд спанов и UI. Для больших проектов не подходит, но для лабораторной работы удобно.<br>
+
+Заменяем в values.yaml api:
+```Python
+env:
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger.monitoring:4317"
+```
+прописываем адрес джагера.<br>
+
+Подключаем репо джагера:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2$ helm repo add jaegertracing https://jaegertracing.github.io/helm-charts
+helm repo update
+helm search repo jaeger
+...
+Update Complete. ⎈Happy Helming!⎈
+NAME                         	CHART VERSION	APP VERSION	DESCRIPTION                              
+jaegertracing/jaeger         	4.14.0       	2.21.0     	A Jaeger Helm chart for Kubernetes       
+jaegertracing/jaeger-operator	2.57.0       	1.61.0     	jaeger-operator Helm chart for Kubernetes
+
+```
+Создаем values:
+```
+touch jaeger-values.yaml
+```
+provisionDataStore - все false, так как не используем внешние БД <br>
+storage.type: memory - спаны в памяти пода хранятся <br>
+allInOne.enabled: true -  все в 1 поде <br>
+agent/collector/query: false - не выносим в отдельные компоненты <br>
+
+Проверяем рендер:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ helm template jaeger jaegertracing/jaeger \
+  --namespace monitoring \
+  -f jaeger-values.yaml \
+  > /tmp/jaeger-rendered.yaml
+
+wc -l /tmp/jaeger-rendered.yaml
+grep -E '^kind: ' /tmp/jaeger-rendered.yaml | sort | uniq -c
+185 /tmp/jaeger-rendered.yaml
+      1 kind: Deployment       #Jaeger all-in-one
+      1 kind: Service
+      1 kind: ServiceAccount
+```
+Устанавливаем:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ cd ~/itmo-devops-labs/lab2/helm/monitoring
+helm install jaeger jaegertracing/jaeger \
+  --namespace monitoring \
+  -f jaeger-values.yaml
+NAME: jaeger
+LAST DEPLOYED: Mon Sep 28 14:02:56 2026
+NAMESPACE: monitoring
+STATUS: deployed
+REVISION: 1
+```
+смотрим поды:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ kubectl get pods -n monitoring | grep jaeger
+jaeger-f8d899587-9pnzf                                  1/1     Running     0                2m5s
+```
+Запускаем Jaeger UI:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ kubectl port-forward -n monitoring svc/jaeger 16686:16686
+```
+Переходим по ссылке: http://localhost:16686:
+<img width="1379" height="191" alt="изображение" src="https://github.com/user-attachments/assets/ca1ef6cd-36c9-40ba-a1e3-2d52643c70d0" />
+ворк ворк!
+ Обнавляем релиз:
+ ```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ cd ~/itmo-devops-labs/lab2/helm
+helm upgrade api ./api
+Release "api" has been upgraded. Happy Helming!
+NAME: api
+LAST DEPLOYED: Mon Sep 28 14:08:36 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 3
+```
+Делаем запросы:
+```
+curl -i localhost:5001/health
+curl -i localhost:5001/fail
+curl localhost:5001/slow
+```
+и смотрим в джагере трейсы:
+<img width="2048" height="796" alt="изображение" src="https://github.com/user-attachments/assets/43399d52-c032-4847-9de2-97f75f192d6b" />
+api: GET /slow — 2 спана (так как мы делали вложенный), длительность 1.1с  <br>
+<img width="2771" height="436" alt="изображение" src="https://github.com/user-attachments/assets/ce3ca0f2-df76-4405-bbac-63b89742266a" />
+api: GET /health — короткий, зелёный  <br>
+api: GET /metrics — много, потому что Prometheus скрейпит каждые 15с <br>
+api: GET /fail — Errors  <br>
+<img width="1379" height="721" alt="изображение" src="https://github.com/user-attachments/assets/480b2b11-03bb-4a62-9a9f-7db140978660" />
+На скриншоте видно 4ca6c07 - trace id.
+Ищем лог в grafana: 
+<img width="1268" height="259" alt="изображение" src="https://github.com/user-attachments/assets/17b6c336-8b21-4713-8033-e15b69ef57ea" />
+<img width="1176" height="366" alt="изображение" src="https://github.com/user-attachments/assets/18ffb6a3-48d9-4ef4-abbb-9be819d35c5e" />
+Тут указан полный айдишник: 4ca6c07cdfb8bb85809c07824765d0a0 и по нему в джагере ищем:
+<img width="1386" height="759" alt="изображение" src="https://github.com/user-attachments/assets/cf6d7842-f272-4575-be86-812848b9000e" />
+Значит связь джагера и локи работает: айдишники запросов совпадают.
+
+## Часть 4. Alertmanager + Karma
+Alertmanager собирает алерты от Prometheus, группирует их и рассылает.<br>
+Он у нас уже установлен вместе kube-prometheus-stack.<br>
+Karma - UI поверх Alertmanager, позволяет осуществлять поиск и фильтрацию алертов.<br>
+
+Для задания берем следующие алерты:
+- высока доля ошибок (больше 5% от всех запросов)
+```
+sum(rate(http_request_errors_total{job="api"}[5m]))
+/
+sum(rate(http_requests_total{job="api"}[5m]))
+> 0.05
+```
+- высокий p95
+- сервис упал
+
+У нас алертменеджер работает на порте 9093 (дефолтный порт):
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2$ kubectl get pods -n monitoring | grep alertmanager
+kubectl get svc -n monitoring | grep alertmanager
+alertmanager-kube-prom-kube-prometheus-alertmanager-0   2/2     Running            0                3d2h
+alertmanager-operated                    ClusterIP   None             <none>        9093/TCP,9094/TCP,9094/UDP                                                                                                           3d2h
+kube-prom-kube-prometheus-alertmanager   ClusterIP   10.100.193.40    <none>        9093/TCP,8080/TCP                                                                                                                    3d2h
+```
+проверяем http://localhost:9093:
+<img width="1386" height="823" alt="изображение" src="https://github.com/user-attachments/assets/e65df17d-900e-4b86-b2a0-2424d49e0f1c" />
+
+1. Создаем **PrometheusRule.yaml**:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2$ cd ~/itmo-devops-labs/lab2/helm/api/templates
+touch prometheusrule.yaml
+```
+на примере 1 из алертов:
+```Python
+        - alert: HighErrorRate
+          expr: |           #PromQL-выражение (если тру, алерт переходит в Pending)
+            sum(rate(http_request_errors_total{job="api"}[5m]))
+            /
+            sum(rate(http_requests_total{job="api"}[5m]))
+            > 0.05
+          for: 2m
+          labels:
+            severity: critical  #уровень критичности
+            service: api
+          annotations:
+            summary: "Высокая доля ошибок на api (>5%)"
+            description: "Доля ошибок 5xx превысила 5% за последние 5 минут. Пользователи получают ошибки. Смотрите логи в Grafana и трейсы в Jaeger."
+```
+В lab2/helm/api/values.yaml включаем флаг:
+```Python
+prometheusRule:
+  enabled: true
+```
+
+Проверяем рендерится ли:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ cd ~/itmo-devops-labs/lab2/helm
+helm template api ./api | grep -E '^kind: ' | sort | uniq -c
+      1 kind: Deployment
+      1 kind: PrometheusRule
+      1 kind: Service
+      1 kind: ServiceMonitor
+```
+Обновляем релиз и получаем 4 версию:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ helm upgrade api ./api
+Release "api" has been upgraded. Happy Helming!
+NAME: api
+LAST DEPLOYED: Mon Sep 28 16:22:47 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 4
+```
+Prometheus видит правила:
+<img width="1386" height="823" alt="изображение" src="https://github.com/user-attachments/assets/6daf86ea-27d7-4f66-919f-10012f8295f1" />
+Алерты появились:
+<img width="1386" height="823" alt="изображение" src="https://github.com/user-attachments/assets/e33de440-f107-4bbd-bc6a-6ec69cf7ba9e" />
+все три алерта не выполняются сейчас.
+
+2. Устанавливаем Karma:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ helm repo add karma https://wiremind.github.io/wiremind-helm-charts
+helm repo update
+helm search repo karma
+"karma" has been added to your repositories
+...
+Update Complete. ⎈Happy Helming!⎈
+```
+Создаем **karma-values.yaml**:
+```
+cd ~/itmo-devops-labs/lab2/helm/monitoring
+touch karma-values.yaml
+```
+Заполняем:
+```
+env:
+  - name: ALERTMANAGER_URI
+    value: http://kube-prom-kube-prometheus-alertmanager.monitoring:9093
+
+persistence:
+  enabled: false
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: http
+```
+Рендернг четкий:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ helm template karma karma/karma \
+  --namespace monitoring \
+  -f karma-values.yaml \
+  > /tmp/karma-rendered.yaml
+
+wc -l /tmp/karma-rendered.yaml
+grep -E '^kind: ' /tmp/karma-rendered.yaml | sort | uniq -c
+100 /tmp/karma-rendered.yaml
+      1 kind: Deployment
+      1 kind: Service       #сама карма
+      1 kind: ServiceAccount
+```
+ставим:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ cd ~/itmo-devops-labs/lab2/helm/monitoring
+helm install karma karma/karma \
+  --namespace monitoring \
+  -f karma-values.yaml
+NAME: karma
+LAST DEPLOYED: Mon Sep 28 16:40:56 2026
+NAMESPACE: monitoring
+STATUS: deployed
+REVISION: 1
+
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ kubectl get pods -n monitoring | grep karma
+kubectl get svc -n monitoring | grep karma
+karma-7d7978cd79-pwm2h                                  1/1     Running     0                28s
+karma                                    ClusterIP   10.96.217.73     <none>        8080/TCP                                                                                                                             28s
+```
+В терминале:
+```
+kubectl port-forward -n monitoring svc/karma 8080:8080
+```
+В браузере: http://localhost:8080:
+<img width="1379" height="274" alt="изображение" src="https://github.com/user-attachments/assets/674b9f6d-c7b3-4212-ba53-71635a3c80cd" />
+открывается, 0 алертов.
+Спровоцируем алерты:
+1. HighErrorRate  <br>
+Делаем 100 запросов на /fail — ошибок 100%
+```
+for i in $(seq 1 100); do
+  curl -s -o /dev/null localhost:5001/fail
+done
+```
+karma
+<img width="1363" height="321" alt="изображение" src="https://github.com/user-attachments/assets/f835c62a-a3b0-4682-b649-87083b4e954a" />
+alertmanager
+<img width="1336" height="624" alt="изображение" src="https://github.com/user-attachments/assets/54473d39-17b7-4e86-9ea8-614b58b43187" />
+prometheus
+<img width="1331" height="528" alt="изображение" src="https://github.com/user-attachments/assets/b308dc28-d8a3-4f96-bbf3-9393ffd31fab" />
+
+
+2. HighLatency  <br>
+Дёргаем /slow несколько раз — p95 подскочит до 1-3 сек
+```
+for i in $(seq 1 10); do
+  curl -s -o /dev/null localhost:5001/slow
+done
+```
+karma
+<img width="1351" height="523" alt="изображение" src="https://github.com/user-attachments/assets/4ec7e5b1-966b-4acb-af65-67c8f47a1913" />
+alertmanager
+<img width="1361" height="774" alt="изображение" src="https://github.com/user-attachments/assets/77e78b42-e0dd-4135-b9ff-020bbe8ae312" />
+prometheus
+<img width="1331" height="528" alt="изображение" src="https://github.com/user-attachments/assets/033963fa-3f6a-4f7c-ab96-8982e4cc8a9f" />
+
+
+3. ServiceDown <br>
+Убираем под api — Prometheus не сможет его скрейпить 
+```
+kubectl scale deploy api --replicas=0
+```
+karma
+<img width="1364" height="301" alt="изображение" src="https://github.com/user-attachments/assets/684ec87d-a520-421f-b513-67e726001458" />
+alertmanager
+<img width="1351" height="523" alt="изображение" src="https://github.com/user-attachments/assets/85e9e63a-c811-4395-a52d-81762f35f28e" />
+prometheus
+<img width="1351" height="523" alt="изображение" src="https://github.com/user-attachments/assets/d211a158-b697-465f-8b27-6ea6023c882e" />
+<img width="1351" height="523" alt="изображение" src="https://github.com/user-attachments/assets/b6a34fa1-b7f1-47c8-aad2-94c042dcdec7" />
+
+Все работает, алерты вылазиют, ура мы умеем насраивать мониторинг!
+
+

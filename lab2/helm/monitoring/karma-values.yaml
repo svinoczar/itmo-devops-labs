@@ -1,0 +1,19 @@
+env:
+  - name: ALERTMANAGER_URI
+    value: http://kube-prom-kube-prometheus-alertmanager.monitoring:9093
+
+persistence:
+  enabled: false
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: http
