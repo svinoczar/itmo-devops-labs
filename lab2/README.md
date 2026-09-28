@@ -733,7 +733,6 @@ loki-headless                            ClusterIP   None             <none>    
 ```
 В grafanа добавляем локи и вводим http://loki:3100.<br>
 Видим наши логи:
-
 <img width="1281" height="1436" alt="изображение" src="https://github.com/user-attachments/assets/f6d7ac86-8ac7-47fe-9f4d-630bf9b64545" />
 Ищем логи /fail. 
 Вызовем через терминал:
@@ -743,10 +742,110 @@ curl -i localhost:5001/fail
 Вводим в Grafana {namespace="default"} |= "simulated failure" в Query поле:
 <img width="1184" height="393" alt="изображение" src="https://github.com/user-attachments/assets/6c6ee122-febd-45d2-96d7-41394f3d229c" />
 
+## Часть 3. OpenTelemetry + Jaeger
+Так как зависимости в сервер мы уже добавили, прописали корневой спан, вложенный спан для /slow, error-статус /fail, а также экспортер. <br>
+Но спаны никуда сейчас не экмпортируются, поэтому нужнор настроить Jaeger - приемник ( для хранения и визуализации трейсов).<br>
+Для реализации будем использовать принцип all-in-one - всё в одном процессе: и прием спанов, и бд спанов и UI. Для больших проектов не подходит, но для лабораторной работы удобно.<br>
 
+Заменяем в values.yaml api:
+```Python
+env:
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger.monitoring:4317"
+```
+прописываем адрес джагера.<br>
 
-## Часть 3. Трейсы (OpenTelemetry + Jaeger)
-(заполним позже)
+Подключаем репо джагера:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2$ helm repo add jaegertracing https://jaegertracing.github.io/helm-charts
+helm repo update
+helm search repo jaeger
+...
+Update Complete. ⎈Happy Helming!⎈
+NAME                         	CHART VERSION	APP VERSION	DESCRIPTION                              
+jaegertracing/jaeger         	4.14.0       	2.21.0     	A Jaeger Helm chart for Kubernetes       
+jaegertracing/jaeger-operator	2.57.0       	1.61.0     	jaeger-operator Helm chart for Kubernetes
+
+```
+Создаем values:
+```
+touch jaeger-values.yaml
+```
+provisionDataStore - все false, так как не используем внешние БД <br>
+storage.type: memory - спаны в памяти пода хранятся <br>
+allInOne.enabled: true -  все в 1 поде <br>
+agent/collector/query: false - не выносим в отдельные компоненты <br>
+
+Проверяем рендер:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ helm template jaeger jaegertracing/jaeger \
+  --namespace monitoring \
+  -f jaeger-values.yaml \
+  > /tmp/jaeger-rendered.yaml
+
+wc -l /tmp/jaeger-rendered.yaml
+grep -E '^kind: ' /tmp/jaeger-rendered.yaml | sort | uniq -c
+185 /tmp/jaeger-rendered.yaml
+      1 kind: Deployment       #Jaeger all-in-one
+      1 kind: Service
+      1 kind: ServiceAccount
+```
+Устанавливаем:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ cd ~/itmo-devops-labs/lab2/helm/monitoring
+helm install jaeger jaegertracing/jaeger \
+  --namespace monitoring \
+  -f jaeger-values.yaml
+NAME: jaeger
+LAST DEPLOYED: Mon Sep 28 14:02:56 2026
+NAMESPACE: monitoring
+STATUS: deployed
+REVISION: 1
+```
+смотрим поды:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ kubectl get pods -n monitoring | grep jaeger
+jaeger-f8d899587-9pnzf                                  1/1     Running     0                2m5s
+```
+Запускаем Jaeger UI:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ kubectl port-forward -n monitoring svc/jaeger 16686:16686
+```
+Переходим по ссылке: http://localhost:16686:
+<img width="1379" height="191" alt="изображение" src="https://github.com/user-attachments/assets/ca1ef6cd-36c9-40ba-a1e3-2d52643c70d0" />
+ворк ворк!
+ Обнавляем релиз:
+ ```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ cd ~/itmo-devops-labs/lab2/helm
+helm upgrade api ./api
+Release "api" has been upgraded. Happy Helming!
+NAME: api
+LAST DEPLOYED: Mon Sep 28 14:08:36 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 3
+```
+Делаем запросы:
+```
+curl -i localhost:5001/health
+curl -i localhost:5001/fail
+curl localhost:5001/slow
+```
+и смотрим в джагере трейсы:
+<img width="2048" height="796" alt="изображение" src="https://github.com/user-attachments/assets/43399d52-c032-4847-9de2-97f75f192d6b" />
+api: GET /slow — 2 спана (так как мы делали вложенный), длительность 1.1с  <br>
+<img width="2771" height="436" alt="изображение" src="https://github.com/user-attachments/assets/ce3ca0f2-df76-4405-bbac-63b89742266a" />
+api: GET /health — короткий, зелёный  <br>
+api: GET /metrics — много, потому что Prometheus скрейпит каждые 15с <br>
+api: GET /fail — Errors  <br>
+<img width="1379" height="721" alt="изображение" src="https://github.com/user-attachments/assets/480b2b11-03bb-4a62-9a9f-7db140978660" />
+На скриншоте видно 4ca6c07 - trace id.
+Ищем лог в grafana: 
+<img width="1268" height="259" alt="изображение" src="https://github.com/user-attachments/assets/17b6c336-8b21-4713-8033-e15b69ef57ea" />
+<img width="1176" height="366" alt="изображение" src="https://github.com/user-attachments/assets/18ffb6a3-48d9-4ef4-abbb-9be819d35c5e" />
+Тут указан полный айдишник: 4ca6c07cdfb8bb85809c07824765d0a0 и по нему в джагере ищем:
+<img width="1386" height="759" alt="изображение" src="https://github.com/user-attachments/assets/cf6d7842-f272-4575-be86-812848b9000e" />
+Значит связь джагера и локи работает: айдишники запросов совпадают.
+
 
 ## Часть 4. Алерты (Alertmanager + Karma)
 (заполним позже)
