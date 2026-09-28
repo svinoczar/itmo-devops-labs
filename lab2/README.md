@@ -6,7 +6,40 @@
 - kubectl v1.31.14
 - minikube v1.39.0 (driver: docker, 4 CPU, 8 GB RAM), Kubernetes v1.37.0
 - Helm v3.22.0
-- Python 3.14.4
+- Python 3.14.4<br>
+<br>
+
+## Быстрые комады 
+
+**Сервис api** http://localhost:5001<br>
+```
+kubectl port-forward svc/api 5001:5000
+```
+
+**Prometheus** http://localhost:9090<br>
+```
+kubectl port-forward -n monitoring svc/kube-prom-kube-prometheus-prometheus 9090:9090
+```
+
+**Grafana** http://localhost:3000<br>
+```
+kubectl port-forward -n monitoring svc/kube-prom-grafana 3000:80
+```
+
+**Jaeger** http://localhost:16686<br>
+```
+kubectl port-forward -n monitoring svc/jaeger 16686:16686
+```
+
+**Alertmanager** http://localhost:9093<br>
+```
+kubectl port-forward -n monitoring svc/kube-prom-kube-prometheus-alertmanager 9093:9093
+```
+
+**Karma** http://localhost:8080<br>
+```
+kubectl port-forward -n monitoring svc/karma 8080:8080
+```
 
 ## Часть 0. Сервис api 
 Создаем HTTP сервер с следующей структурой проекта: <br>
@@ -652,7 +685,7 @@ histogram_quantile(
 Панель p95 Latency: /slow — подскочил до ~4.4 секунды.
 
 
-## Часть 2. Логи (Loki + Grafana)
+## Часть 2. Loki + Grafana
 Loki - база данных для хоранения логов.<br>
 Подключаем репозитории Helm:
 ```
@@ -846,9 +879,203 @@ api: GET /fail — Errors  <br>
 <img width="1386" height="759" alt="изображение" src="https://github.com/user-attachments/assets/cf6d7842-f272-4575-be86-812848b9000e" />
 Значит связь джагера и локи работает: айдишники запросов совпадают.
 
+## Часть 4. Alertmanager + Karma
+Alertmanager собирает алерты от Prometheus, группирует их и рассылает.<br>
+Он у нас уже установлен вместе kube-prometheus-stack.<br>
+Karma - UI поверх Alertmanager, позволяет осуществлять поиск и фильтрацию алертов.<br>
 
-## Часть 4. Алерты (Alertmanager + Karma)
-(заполним позже)
+Для задания берем следующие алерты:
+- высока доля ошибок (больше 5% от всех запросов)
+```
+sum(rate(http_request_errors_total{job="api"}[5m]))
+/
+sum(rate(http_requests_total{job="api"}[5m]))
+> 0.05
+```
+- высокий p95
+- сервис упал
 
-## Итог
-(заполним позже)
+У нас алертменеджер работает на порте 9093 (дефолтный порт):
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2$ kubectl get pods -n monitoring | grep alertmanager
+kubectl get svc -n monitoring | grep alertmanager
+alertmanager-kube-prom-kube-prometheus-alertmanager-0   2/2     Running            0                3d2h
+alertmanager-operated                    ClusterIP   None             <none>        9093/TCP,9094/TCP,9094/UDP                                                                                                           3d2h
+kube-prom-kube-prometheus-alertmanager   ClusterIP   10.100.193.40    <none>        9093/TCP,8080/TCP                                                                                                                    3d2h
+```
+проверяем http://localhost:9093:
+<img width="1386" height="823" alt="изображение" src="https://github.com/user-attachments/assets/e65df17d-900e-4b86-b2a0-2424d49e0f1c" />
+
+1. Создаем **PrometheusRule.yaml**:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2$ cd ~/itmo-devops-labs/lab2/helm/api/templates
+touch prometheusrule.yaml
+```
+на примере 1 из алертов:
+```Python
+        - alert: HighErrorRate
+          expr: |           #PromQL-выражение (если тру, алерт переходит в Pending)
+            sum(rate(http_request_errors_total{job="api"}[5m]))
+            /
+            sum(rate(http_requests_total{job="api"}[5m]))
+            > 0.05
+          for: 2m
+          labels:
+            severity: critical  #уровень критичности
+            service: api
+          annotations:
+            summary: "Высокая доля ошибок на api (>5%)"
+            description: "Доля ошибок 5xx превысила 5% за последние 5 минут. Пользователи получают ошибки. Смотрите логи в Grafana и трейсы в Jaeger."
+```
+В lab2/helm/api/values.yaml включаем флаг:
+```Python
+prometheusRule:
+  enabled: true
+```
+
+Проверяем рендерится ли:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ cd ~/itmo-devops-labs/lab2/helm
+helm template api ./api | grep -E '^kind: ' | sort | uniq -c
+      1 kind: Deployment
+      1 kind: PrometheusRule
+      1 kind: Service
+      1 kind: ServiceMonitor
+```
+Обновляем релиз и получаем 4 версию:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ helm upgrade api ./api
+Release "api" has been upgraded. Happy Helming!
+NAME: api
+LAST DEPLOYED: Mon Sep 28 16:22:47 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 4
+```
+Prometheus видит правила:
+<img width="1386" height="823" alt="изображение" src="https://github.com/user-attachments/assets/6daf86ea-27d7-4f66-919f-10012f8295f1" />
+Алерты появились:
+<img width="1386" height="823" alt="изображение" src="https://github.com/user-attachments/assets/e33de440-f107-4bbd-bc6a-6ec69cf7ba9e" />
+все три алерта не выполняются сейчас.
+
+2. Устанавливаем Karma:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm$ helm repo add karma https://wiremind.github.io/wiremind-helm-charts
+helm repo update
+helm search repo karma
+"karma" has been added to your repositories
+...
+Update Complete. ⎈Happy Helming!⎈
+```
+Создаем **karma-values.yaml**:
+```
+cd ~/itmo-devops-labs/lab2/helm/monitoring
+touch karma-values.yaml
+```
+Заполняем:
+```
+env:
+  - name: ALERTMANAGER_URI
+    value: http://kube-prom-kube-prometheus-alertmanager.monitoring:9093
+
+persistence:
+  enabled: false
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: http
+```
+Рендернг четкий:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ helm template karma karma/karma \
+  --namespace monitoring \
+  -f karma-values.yaml \
+  > /tmp/karma-rendered.yaml
+
+wc -l /tmp/karma-rendered.yaml
+grep -E '^kind: ' /tmp/karma-rendered.yaml | sort | uniq -c
+100 /tmp/karma-rendered.yaml
+      1 kind: Deployment
+      1 kind: Service       #сама карма
+      1 kind: ServiceAccount
+```
+ставим:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ cd ~/itmo-devops-labs/lab2/helm/monitoring
+helm install karma karma/karma \
+  --namespace monitoring \
+  -f karma-values.yaml
+NAME: karma
+LAST DEPLOYED: Mon Sep 28 16:40:56 2026
+NAMESPACE: monitoring
+STATUS: deployed
+REVISION: 1
+
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ kubectl get pods -n monitoring | grep karma
+kubectl get svc -n monitoring | grep karma
+karma-7d7978cd79-pwm2h                                  1/1     Running     0                28s
+karma                                    ClusterIP   10.96.217.73     <none>        8080/TCP                                                                                                                             28s
+```
+В терминале:
+```
+kubectl port-forward -n monitoring svc/karma 8080:8080
+```
+В браузере: http://localhost:8080:
+<img width="1379" height="274" alt="изображение" src="https://github.com/user-attachments/assets/674b9f6d-c7b3-4212-ba53-71635a3c80cd" />
+открывается, 0 алертов.
+Спровоцируем алерты:
+1. HighErrorRate  <br>
+Делаем 100 запросов на /fail — ошибок 100%
+```
+for i in $(seq 1 100); do
+  curl -s -o /dev/null localhost:5001/fail
+done
+```
+karma
+<img width="1363" height="321" alt="изображение" src="https://github.com/user-attachments/assets/f835c62a-a3b0-4682-b649-87083b4e954a" />
+alertmanager
+<img width="1336" height="624" alt="изображение" src="https://github.com/user-attachments/assets/54473d39-17b7-4e86-9ea8-614b58b43187" />
+prometheus
+<img width="1331" height="528" alt="изображение" src="https://github.com/user-attachments/assets/b308dc28-d8a3-4f96-bbf3-9393ffd31fab" />
+
+
+2. HighLatency  <br>
+Дёргаем /slow несколько раз — p95 подскочит до 1-3 сек
+```
+for i in $(seq 1 10); do
+  curl -s -o /dev/null localhost:5001/slow
+done
+```
+karma
+<img width="1351" height="523" alt="изображение" src="https://github.com/user-attachments/assets/4ec7e5b1-966b-4acb-af65-67c8f47a1913" />
+alertmanager
+<img width="1361" height="774" alt="изображение" src="https://github.com/user-attachments/assets/77e78b42-e0dd-4135-b9ff-020bbe8ae312" />
+prometheus
+<img width="1331" height="528" alt="изображение" src="https://github.com/user-attachments/assets/033963fa-3f6a-4f7c-ab96-8982e4cc8a9f" />
+
+
+3. ServiceDown <br>
+Убираем под api — Prometheus не сможет его скрейпить 
+```
+kubectl scale deploy api --replicas=0
+```
+karma
+<img width="1364" height="301" alt="изображение" src="https://github.com/user-attachments/assets/684ec87d-a520-421f-b513-67e726001458" />
+alertmanager
+<img width="1351" height="523" alt="изображение" src="https://github.com/user-attachments/assets/85e9e63a-c811-4395-a52d-81762f35f28e" />
+prometheus
+<img width="1351" height="523" alt="изображение" src="https://github.com/user-attachments/assets/d211a158-b697-465f-8b27-6ea6023c882e" />
+<img width="1351" height="523" alt="изображение" src="https://github.com/user-attachments/assets/b6a34fa1-b7f1-47c8-aad2-94c042dcdec7" />
+
+Все работает, алерты вылазиют, ура мы умеем насраивать мониторинг!
+
+
