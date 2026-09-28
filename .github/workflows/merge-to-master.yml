@@ -1,0 +1,83 @@
+name: Merge To Master Action
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - master
+      jobs:
+  organize:
+    if: >
+      github.event.pull_request.merged == true &&
+      (
+        github.event.pull_request.head.ref == 'sashka' ||
+        github.event.pull_request.head.ref == 'maria-maria' ||
+        github.event.pull_request.head.ref == 'sergo'
+      )
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout master
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Checkout source branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          path: source
+
+      - name: Organize labs
+        env:
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -e
+
+          echo "Processing branch: $BRANCH"
+
+          for SOURCE_LAB in source/lab*; do
+            if [ ! -d "$SOURCE_LAB" ]; then
+              continue
+            fi
+
+            LAB=$(basename "$SOURCE_LAB")
+
+            mkdir -p "$LAB/$BRANCH"
+
+            rm -rf "$LAB/$BRANCH"
+            mkdir -p "$LAB/$BRANCH"
+
+            cp -a "$SOURCE_LAB"/. "$LAB/$BRANCH"/
+
+            find "$LAB" -mindepth 1 -maxdepth 1 \
+              ! -name "$BRANCH" \
+              -exec rm -rf {} \;
+
+            echo "$LAB -> $LAB/$BRANCH"
+          done
+
+          rm -rf source
+
+      - name: Commit changes
+        env:
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -e
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          git commit -m "chore: organize $LAB by $BRANCH"
+          git push origin master
