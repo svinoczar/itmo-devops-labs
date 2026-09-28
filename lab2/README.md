@@ -724,6 +724,27 @@ loki-promtail-8k6nn                                     1/1     Running   0     
 loki-0 - сам локи <br>
 loki-promtail-8k6nn - под внутри <br>
 
+Подключаем к Grafana.
+Смотрим порт локи:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2$ kubectl get svc -n monitoring | grep loki
+loki                                     ClusterIP   10.107.209.20    <none>        3100/TCP                     12m
+loki-headless                            ClusterIP   None             <none>        3100/TCP                     12m
+```
+В grafanа добавляем локи и вводим http://loki:3100.<br>
+Видим наши логи:
+
+<img width="1281" height="1436" alt="изображение" src="https://github.com/user-attachments/assets/f6d7ac86-8ac7-47fe-9f4d-630bf9b64545" />
+Ищем логи /fail. 
+Вызовем через терминал:
+```
+curl -i localhost:5001/fail
+```
+Вводим в Grafana {namespace="default"} |= "simulated failure" в Query поле:
+<img width="1184" height="393" alt="изображение" src="https://github.com/user-attachments/assets/6c6ee122-febd-45d2-96d7-41394f3d229c" />
+
+
+
 ## Часть 3. Трейсы (OpenTelemetry + Jaeger)
 (заполним позже)
 
