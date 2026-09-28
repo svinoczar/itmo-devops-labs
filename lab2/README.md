@@ -653,8 +653,76 @@ histogram_quantile(
 
 
 ## Часть 2. Логи (Loki + Grafana)
-(заполним позже)
+Loki - база данных для хоранения логов.<br>
+Подключаем репозитории Helm:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2$ helm repo add grafana https://grafana.github.io/helm-charts
+helm repo update
+helm search repo loki
+```
+Создаем yaml файл для loki:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2$ cd ~/itmo-devops-labs/lab2/helm/monitoring
+touch loki-stack-values.yaml
+```
+Прописываем:<br>
+retention_period: 168h — хранить логи 7 дней<br>
+loki.enabled: true<br>
+grafana.enabled: false — уже есть<br>
+prometheus.enabled: false — уже есть<br>
+persistence.enabled: false — логи в emptyDir<br>
 
+Проверяем на валибность:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ cd ~/itmo-devops-labs/lab2/helm/monitoring
+wc -l loki-stack-values.yaml
+python3 -c "import yaml; yaml.safe_load(open('loki-stack-values.yaml')); print('YAML valid')"
+52 loki-stack-values.yaml
+YAML valid
+```
+Рендерим:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ helm template loki grafana/loki-stack \
+  --namespace monitoring \
+  -f loki-stack-values.yaml \
+  > /tmp/loki-rendered.yaml
+
+wc -l /tmp/loki-rendered.yaml
+grep -E '^kind: ' /tmp/loki-rendered.yaml | sort | uniq -c
+WARNING: This chart is deprecated
+607 /tmp/loki-rendered.yaml
+1 kind: DaemonSet         #Promtail (агент на каждой ноде)
+1 kind: StatefulSet       #Loki (хранилище)
+3 kind: Service           #сетевые доступы
+2 kind: ConfigMap         #конфиги Loki и Promtail
+2 kind: Secret            #пароли
+1 kind: Pod               #тестовый под 
+1 kind: ClusterRole       #для чтения метаданных подов
+1 kind: ClusterRoleBinding  
+2 kind: ServiceAccount    #учетная запись внутри кубера
+1 kind: Role              #набор разрещений внутри namespace
+1 kind: RoleBinding
+```
+все ок, ставим.
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2/helm/monitoring$ helm install loki grafana/loki-stack \
+  --namespace monitoring \
+  -f loki-stack-values.yaml
+WARNING: This chart is deprecated
+NAME: loki
+LAST DEPLOYED: Mon Sep 28 12:50:28 2026
+NAMESPACE: monitoring
+STATUS: deployed
+REVISION: 1
+```
+Смотрим поды:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab2$ kubectl get pods -n monitoring | grep -E 'loki|promtail'
+loki-0                                                  1/1     Running   0          3m37s
+loki-promtail-8k6nn                                     1/1     Running   0          3m37s
+```
+loki-0 - сам локи <br>
+loki-promtail-8k6nn - под внутри <br>
 
 ## Часть 3. Трейсы (OpenTelemetry + Jaeger)
 (заполним позже)
