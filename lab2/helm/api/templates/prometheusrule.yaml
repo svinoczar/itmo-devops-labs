@@ -1,0 +1,63 @@
+{{- if .Values.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "api.fullname" . }}
+  labels:
+    {{- include "api.labels" . | nindent 4 }}
+    release: monitoring
+spec:
+  groups:
+    - name: api-critical
+      rules:
+        - alert: ApiUnavailable
+          expr: |
+            (up{job="api"} == 0)
+            or absent(up{job="api"})
+          for: {{ .Values.prometheusRule.for }}
+          labels:
+            severity: critical
+            service: api
+          annotations:
+            summary: API недоступен
+            description: Prometheus не может собрать метрики API.
+            action: Проверить Pod, Service, EndpointSlice и события Kubernetes.
+
+        - alert: ApiHighErrorRate
+          expr: |
+            (
+              sum(rate(api_http_request_errors_total[2m]))
+              /
+              clamp_min(
+                sum(rate(api_http_requests_total{route!="/health"}[2m])),
+                0.001
+              )
+            ) > {{ .Values.prometheusRule.errorRateThreshold }}
+          for: {{ .Values.prometheusRule.for }}
+          labels:
+            severity: critical
+            service: api
+          annotations:
+            summary: Высокая доля ошибок API
+            description: Более 20% пользовательских запросов завершаются ошибкой.
+            action: Проверить последние изменения, логи ERROR и ошибочные трейсы.
+
+        - alert: ApiHighP95Latency
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum by (le) (
+                rate(
+                  api_http_request_duration_seconds_bucket{route!="/health"}[2m]
+                )
+              )
+            ) > {{ .Values.prometheusRule.latencyThresholdSeconds }}
+          for: {{ .Values.prometheusRule.for }}
+          labels:
+            severity: critical
+            service: api
+          annotations:
+            summary: Высокая задержка API
+            description: p95 времени ответа API превышает одну секунду.
+            action: Проверить RED-дашборд и медленные трейсы в Jaeger.
+{{- end }}

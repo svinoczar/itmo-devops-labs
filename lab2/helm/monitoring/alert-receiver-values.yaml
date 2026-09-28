@@ -1,0 +1,23 @@
+replicaCount: 1
+
+fullnameOverride: alert-receiver
+
+image:
+  repository: ealen/echo-server
+  tag: 0.9.2
+  pullPolicy: IfNotPresent
+
+serviceAccount:
+  create: false
+  name: default
+
+service:
+  type: ClusterIP
+  port: 80
+
+application:
+  logs:
+    ignore:
+      ping: true
+  enable:
+    environment: false
