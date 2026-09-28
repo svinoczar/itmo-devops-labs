@@ -1,10 +1,12 @@
 name: Merge To Master Action
+
 on:
   pull_request:
     types: [closed]
     branches:
       - master
-      jobs:
+
+jobs:
   organize:
     if: >
       github.event.pull_request.merged == true &&
@@ -47,6 +49,8 @@ on:
 
             LAB=$(basename "$SOURCE_LAB")
 
+            echo "Processing $LAB"
+
             mkdir -p "$LAB/$BRANCH"
 
             rm -rf "$LAB/$BRANCH"
@@ -79,5 +83,5 @@ on:
             exit 0
           fi
 
-          git commit -m "chore: organize $LAB by $BRANCH"
+          git commit -m "chore: organize labs by $BRANCH"
           git push origin master
