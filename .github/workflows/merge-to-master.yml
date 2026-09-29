@@ -28,42 +28,106 @@ jobs:
           ref: master
           fetch-depth: 0
 
-      - name: Checkout source branch
+      - name: Get source branch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: ${{ github.event.pull_request.head.sha }}
           path: source
+          fetch-depth: 0
 
-      - name: Organize labs
+      - name: Organize changed labs
         env:
           BRANCH: ${{ github.event.pull_request.head.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -e
 
-          echo "Processing branch: $BRANCH"
+          echo "Branch: $BRANCH"
+          echo "Base: $BASE_SHA"
+          echo "Head: $HEAD_SHA"
 
-          for SOURCE_LAB in source/lab*; do
-            if [ ! -d "$SOURCE_LAB" ]; then
+          cd source
+
+          # Получаем только файлы, измененные в PR
+          git diff --name-status -M "$BASE_SHA" "$HEAD_SHA" > /tmp/changes.txt
+
+          cd ..
+
+          while IFS=$'\t' read -r STATUS PATH OLD_PATH; do
+            # Пропускаем пустые строки
+            [ -z "$PATH" ] && continue
+
+            # Нас интересуют только lab1, lab2, lab3 и т.д.
+            if [[ "$PATH" != lab*/* ]]; then
               continue
             fi
 
-            LAB=$(basename "$SOURCE_LAB")
+            LAB="${PATH%%/*}"
 
-            echo "Processing $LAB"
+            echo ""
+            echo "Processing: $STATUS $PATH"
 
-            mkdir -p "$LAB/$BRANCH"
+            case "$STATUS" in
 
-            rm -rf "$LAB/$BRANCH"
-            mkdir -p "$LAB/$BRANCH"
+              A|M)
+                # Добавленный или измененный файл
+                TARGET="$LAB/$BRANCH/$PATH"
 
-            cp -a "$SOURCE_LAB"/. "$LAB/$BRANCH"/
+                # Убираем labN/ из пути
+                RELATIVE_PATH="${PATH#*/}"
+                TARGET="$LAB/$BRANCH/$RELATIVE_PATH"
 
-            find "$LAB" -mindepth 1 -maxdepth 1 \
-              ! -name "$BRANCH" \
-              -exec rm -rf {} \;
+                mkdir -p "$(dirname "$TARGET")"
 
-            echo "$LAB -> $LAB/$BRANCH"
-          done
+                cp "source/$PATH" "$TARGET"
+
+                # Удаляем файл, который Git добавил в корень labN
+                rm -f "$PATH"
+
+                echo "  source/$PATH"
+                echo "       -> $TARGET"
+                ;;
+
+              D)
+                # Файл удален в исходной ветке
+                RELATIVE_PATH="${PATH#*/}"
+                TARGET="$LAB/$BRANCH/$RELATIVE_PATH"
+
+                rm -f "$TARGET"
+
+                # Удаляем возможный файл из корня labN
+                rm -f "$PATH"
+
+                echo "  deleted $TARGET"
+                ;;
+
+              R*)
+                # Rename: удаляем старый файл
+                OLD_RELATIVE="${OLD_PATH#*/}"
+                OLD_TARGET="$LAB/$BRANCH/$OLD_RELATIVE"
+
+                rm -f "$OLD_TARGET"
+
+                # И добавляем новый
+                RELATIVE_PATH="${PATH#*/}"
+                TARGET="$LAB/$BRANCH/$RELATIVE_PATH"
+
+                mkdir -p "$(dirname "$TARGET")"
+
+                cp "source/$PATH" "$TARGET"
+
+                rm -f "$OLD_PATH"
+                rm -f "$PATH"
+
+                echo "  renamed:"
+                echo "    $OLD_TARGET"
+                echo "    -> $TARGET"
+                ;;
+
+            esac
+
+          done < /tmp/changes.txt
 
           rm -rf source
 
@@ -83,5 +147,5 @@ jobs:
             exit 0
           fi
 
-          git commit -m "chore: organize labs by $BRANCH"
+          git commit -m "chore: organize labs from $BRANCH"
           git push origin master
