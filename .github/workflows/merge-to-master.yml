@@ -54,71 +54,96 @@ jobs:
 
           cd ..
 
-          while IFS=$'\t' read -r STATUS PATH OLD_PATH; do
+          while IFS=$'\t' read -r STATUS FILE_PATH OLD_PATH; do
             # Пропускаем пустые строки
-            [ -z "$PATH" ] && continue
+            [ -z "$FILE_PATH" ] && continue
 
-            # Нас интересуют только lab1, lab2, lab3 и т.д.
-            if [[ "$PATH" != lab*/* ]]; then
+            # Интересуют только lab1, lab2, lab3 и т.д.
+            if [[ "$FILE_PATH" != lab*/* ]]; then
               continue
             fi
 
-            LAB="${PATH%%/*}"
+            LAB="${FILE_PATH%%/*}"
 
             echo ""
-            echo "Processing: $STATUS $PATH"
+            echo "Processing: $STATUS $FILE_PATH"
 
             case "$STATUS" in
 
               A|M)
                 # Добавленный или измененный файл
-                TARGET="$LAB/$BRANCH/$PATH"
 
-                # Убираем labN/ из пути
-                RELATIVE_PATH="${PATH#*/}"
-                TARGET="$LAB/$BRANCH/$RELATIVE_PATH"
+                # Если файл уже находится в labN/<branch>/,
+                # значит он уже организован — оставляем его на месте.
+                if [[ "$FILE_PATH" == "$LAB/$BRANCH/"* ]]; then
+                  TARGET="$FILE_PATH"
 
-                mkdir -p "$(dirname "$TARGET")"
+                  echo "  already organized: $TARGET"
+                else
+                  RELATIVE_PATH="${FILE_PATH#*/}"
+                  TARGET="$LAB/$BRANCH/$RELATIVE_PATH"
 
-                cp "source/$PATH" "$TARGET"
+                  mkdir -p "$(dirname "$TARGET")"
 
-                # Удаляем файл, который Git добавил в корень labN
-                rm -f "$PATH"
+                  cp "source/$FILE_PATH" "$TARGET"
 
-                echo "  source/$PATH"
-                echo "       -> $TARGET"
+                  # Удаляем файл, который Git добавил в корень labN
+                  rm -f "$FILE_PATH"
+
+                  echo "  source/$FILE_PATH"
+                  echo "       -> $TARGET"
+                fi
                 ;;
 
               D)
                 # Файл удален в исходной ветке
-                RELATIVE_PATH="${PATH#*/}"
-                TARGET="$LAB/$BRANCH/$RELATIVE_PATH"
+
+                if [[ "$FILE_PATH" == "$LAB/$BRANCH/"* ]]; then
+                  TARGET="$FILE_PATH"
+                else
+                  RELATIVE_PATH="${FILE_PATH#*/}"
+                  TARGET="$LAB/$BRANCH/$RELATIVE_PATH"
+                fi
 
                 rm -f "$TARGET"
 
                 # Удаляем возможный файл из корня labN
-                rm -f "$PATH"
+                rm -f "$FILE_PATH"
 
                 echo "  deleted $TARGET"
                 ;;
 
               R*)
                 # Rename: удаляем старый файл
-                OLD_RELATIVE="${OLD_PATH#*/}"
-                OLD_TARGET="$LAB/$BRANCH/$OLD_RELATIVE"
+
+                if [[ "$OLD_PATH" == "$LAB/$BRANCH/"* ]]; then
+                  OLD_TARGET="$OLD_PATH"
+                else
+                  OLD_RELATIVE="${OLD_PATH#*/}"
+                  OLD_TARGET="$LAB/$BRANCH/$OLD_RELATIVE"
+                fi
 
                 rm -f "$OLD_TARGET"
 
-                # И добавляем новый
-                RELATIVE_PATH="${PATH#*/}"
-                TARGET="$LAB/$BRANCH/$RELATIVE_PATH"
+                # Добавляем новый файл
+                if [[ "$FILE_PATH" == "$LAB/$BRANCH/"* ]]; then
+                  TARGET="$FILE_PATH"
+                else
+                  RELATIVE_PATH="${FILE_PATH#*/}"
+                  TARGET="$LAB/$BRANCH/$RELATIVE_PATH"
 
-                mkdir -p "$(dirname "$TARGET")"
+                  mkdir -p "$(dirname "$TARGET")"
 
-                cp "source/$PATH" "$TARGET"
+                  cp "source/$FILE_PATH" "$TARGET"
 
-                rm -f "$OLD_PATH"
-                rm -f "$PATH"
+                  # Удаляем файл из корня labN
+                  rm -f "$FILE_PATH"
+                fi
+
+                # На случай rename внутри корня labN
+                if [[ "$OLD_PATH" != "$OLD_TARGET" ]]; then
+                  rm -f "$OLD_PATH"
+                fi
 
                 echo "  renamed:"
                 echo "    $OLD_TARGET"
