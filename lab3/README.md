@@ -184,7 +184,8 @@ namespace/shop created
 
 shop    Active   5s
 ```
-### 1. Создаем правило кластера с лимитом на ресурсы в папке policies:
+### 1. Создаем правило с лимитом на ресурсы
+В папке policies:
 ```Python
 #require-resources.yaml
 
@@ -239,9 +240,130 @@ pod/good-pod created
 kubectl delete pod -n shop good-pod
 ```
 
-### 1. Создаем правило кластера с лимитом на ресурсы в папке policies:
+### 2. Создаем правило на обязательные метки
+Метки - key-value в metadata.labels по которым K8s выбирает объекты.
+В папке policies:
 ```Python
-#require-resources.yaml
+#require-labels.yaml
+
+...
+spec:
+    ...
+      validate:
+        message: "Pod должен иметь метки 'app' и 'owner'"
+        pattern:
+          metadata:
+            labels:
+              app: "?*"
+              owner: "?*"
+
+```
+Применяем политику и проверяем, что она загружена:
+```
+kubectl apply -f policies/require-labels.yaml
+kubectl get clusterpolicies
+```
+ответ
+```
+clusterpolicy.kyverno.io/require-labels created
+
+NAME                ADMISSION   BACKGROUND   READY   AGE   MESSAGE
+require-labels      true        true         True    11s   Ready
+require-resources   true        true         True    16m   Ready
+```
+Создаем плохой манифест bad-labels.yaml в папке bad-manifests без metadata.labels и применяем его:
+```
+kubectl apply -f bad-manifests/bad-labels.yaml
+```
+ответ
+```
+Error from server: error when creating "bad-manifests/bad-labels.yaml": admission webhook "validate.kyverno.svc-fail" denied the request: 
+
+resource Pod/shop/bad-labels was blocked due to the following policies 
+
+require-labels:
+  check-labels: 'validation error: Pod должен иметь метки ''app'' и ''owner''. rule check-labels failed at path /metadata/labels/'
+```
+Для проверки в той же папке создадим под good-labels.yaml с метками:
+```
+kubectl apply -f bad-manifests/good-labels.yaml
+```
+ответ
+```
+pod/good-labels created
+```
+убирем его:
+```
+kubectl delete pod -n shop good-labels
+```
+
+
+### 3. Создаем правило на запрет привелегий
+Ограничение на capabilities, hostPID, сеть и тд, если это не системные компоненты.
+В папке policies:
+```Python
+#disallow-privileged.yaml
+
+...
+spec:
+    ...
+      validate:
+        message: "Запрещены privileged контейнеры, hostNetwork, hostPID, hostPath"
+        pattern:
+          spec:
+            =(hostNetwork): false
+            =(hostPID): false
+            =(volumes):
+              - X(hostPath): "null"
+            containers:
+              - securityContext:
+                  =(privileged): false
+                  =(allowPrivilegeEscalation): false
+
+```
+Применяем политику и проверяем, что она загружена:
+```
+kubectl apply -f policies/disallow-privileged.yaml
+kubectl get clusterpolicies
+```
+ответ
+```
+clusterpolicy.kyverno.io/disallow-privileged created
+NAME                  ADMISSION   BACKGROUND   READY   AGE   MESSAGE
+disallow-privileged   true        true         True    10s   Ready
+require-labels        true        true         True    13m   Ready
+require-resources     true        true         True    29m   Ready
+```
+Создаем плохой манифест bad-privileged.yaml в папке bad-manifests c securityContext.privileged: true и применяем его:
+```
+kubectl apply -f bad-manifests/bad-privileged.yaml
+```
+ответ
+```
+Error from server: error when creating "bad-manifests/bad-privileged.yaml": admission webhook "validate.kyverno.svc-fail" denied the request: 
+
+resource Pod/shop/bad-privileged was blocked due to the following policies 
+
+disallow-privileged:
+  check-privileged: 'validation error: Запрещены privileged контейнеры, hostNetwork, hostPID, hostPath volumes. rule check-privileged failed at path /spec/containers/0/securityContext/privileged/'
+```
+Для проверки в той же папке создадим под good-privileged.yaml и применим его:
+```
+kubectl apply -f bad-manifests/good-privileged.yaml
+```
+ответ
+```
+pod/good-privileged created
+```
+убирем его:
+```
+kubectl delete pod -n shop good-privileged
+```
+
+### 4. Создаем правило на создание образов только из доверенного реестра
+В папке policies:
+```Python
+#trusted-registry.yaml
 
 ...
 
@@ -276,8 +398,8 @@ kubectl delete pod -n shop good-pod
 
 ```
 
-
-### 1. Создаем правило кластера с лимитом на ресурсы в папке policies:
+### 5. Создаем правило
+В папке policies:
 ```Python
 #require-resources.yaml
 
