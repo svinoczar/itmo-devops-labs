@@ -146,3 +146,170 @@ docker.io/library/shop-worker:0.1.0
 docker.io/library/shop-api:0.1.0
 ```
 
+## Часть 1 — Ограждения на кластер
+В качестве admission webhook выбираем Kyverno, так как язык правил привычный YAML и порог входа - низкий.
+Устанавливаем:
+```
+helm repo add kyverno https://kyverno.github.io/kyverno/
+helm repo update
+helm install kyverno kyverno/kyverno -n kyverno --create-namespace
+```
+Смотрим поды
+```
+kubectl get pods -n kyverno
+```
+поды установлены
+```
+NAME                                             READY   STATUS    RESTARTS   AGE
+kyverno-admission-controller-769b8f7647-qkv94    1/1     Running   0          101s
+kyverno-background-controller-86d8df7447-nxzsw   1/1     Running   0          101s
+kyverno-cleanup-controller-86c886ffff-qfq2h      1/1     Running   0          101s
+kyverno-reports-controller-57c7978d69-4h78m      1/1     Running   0          101s
+
+```
+admission-controller - сам webhook (перехватывает kubectl apply и валидирует объекты) <br>
+background-controller - проверяет уже созданные объекты на нарушения <br>
+cleanup-controller - удаляет объекты по CleanupPolicy <br>
+reports-controller - пишет отчеты о нарушениях <br>
+<br>
+Создаем namespace и проверяем создлся ли:
+```
+kubectl create namespace shop
+
+kubectl get ns | grep shop
+```
+ответы
+```
+namespace/shop created
+
+shop    Active   5s
+```
+### 1. Создаем правило кластера с лимитом на ресурсы в папке policies:
+```Python
+#require-resources.yaml
+
+...
+spec:
+    ...
+      validate:
+        message: "Все контейнеры должны иметь resources.limits (cpu и memory)"
+        pattern:
+          spec:
+            containers:
+              - resources:
+                  limits:
+                    memory: "?*"
+                    cpu: "?*"
+
+```
+Применяем политику и проверяем, что она загружена:
+```
+kubectl apply -f ~/itmo-devops-labs/lab3/policies/require-resources.yaml
+kubectl get clusterpolicies
+```
+ответ
+```
+clusterpolicy.kyverno.io/require-resources created
+NAME                ADMISSION   BACKGROUND   READY   AGE   MESSAGE
+require-resources   true        true         True    50s   Ready
+```
+Создаем плохой манифест bad-resources.yaml в папке bad-manifests без resources и применяем его:
+```
+kubectl apply -f ~/itmo-devops-labs/lab3/bad-manifests/bad-resources.yaml
+```
+ответ
+```
+Error from server: error when creating "/home/maria/itmo-devops-labs/lab3/bad-manifests/bad-resources.yaml": admission webhook "validate.kyverno.svc-fail" denied the request: 
+
+resource Pod/shop/bad-resources was blocked due to the following policies 
+
+require-resources:
+  check-containers-limits: 'validation error: Все контейнеры должны иметь resources.limits (cpu и memory). rule check-containers-limits failed at path /spec/containers/0/resources/limits/'
+```
+Для проверки в той же папке создадим под good-pod.yaml с заданными ресурсами и применим его:
+```
+kubectl apply -f ~/itmo-devops-labs/lab3/bad-manifests/good-pod.yaml
+```
+ответ
+```
+pod/good-pod created
+```
+убирем его:
+```
+kubectl delete pod -n shop good-pod
+```
+
+### 1. Создаем правило кластера с лимитом на ресурсы в папке policies:
+```Python
+#require-resources.yaml
+
+...
+
+
+```
+Применяем политику и проверяем, что она загружена:
+```
+
+```
+ответ
+```
+
+```
+Создаем плохой манифест bad-resources.yaml в папке bad-manifests без resources и применяем его:
+```
+
+```
+ответ
+```
+
+```
+Для проверки в той же папке создадим под good-pod.yaml с заданными ресурсами и применим его:
+```
+
+```
+ответ
+```
+
+```
+убирем его:
+```
+
+```
+
+
+### 1. Создаем правило кластера с лимитом на ресурсы в папке policies:
+```Python
+#require-resources.yaml
+
+...
+
+
+```
+Применяем политику и проверяем, что она загружена:
+```
+
+```
+ответ
+```
+
+```
+Создаем плохой манифест bad-resources.yaml в папке bad-manifests без resources и применяем его:
+```
+
+```
+ответ
+```
+
+```
+Для проверки в той же папке создадим под good-pod.yaml с заданными ресурсами и применим его:
+```
+
+```
+ответ
+```
+
+```
+убирем его:
+```
+
+```
