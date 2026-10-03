@@ -366,45 +366,76 @@ kubectl delete pod -n shop good-privileged
 #trusted-registry.yaml
 
 ...
-
+spec:
+  ...
+      validate:
+        message: "Образы должны быть из docker.io/library/* или shop-*"
+        foreach:
+          - list: "request.object.spec.containers"
+            pattern:
+              image: "docker.io/library/* | shop-*"
 
 ```
 Применяем политику и проверяем, что она загружена:
 ```
-
+kubectl apply -f policies/trusted-registry.yaml
+kubectl get clusterpolicies
 ```
 ответ
 ```
-
+clusterpolicy.kyverno.io/trusted-registry created
+NAME                  ADMISSION   BACKGROUND   READY   AGE   MESSAGE
+disallow-privileged   true        true         True    21m   Ready
+require-labels        true        true         True    34m   Ready
+require-resources     true        true         True    50m   Ready
+trusted-registry      true        true         True    20s   Ready
 ```
-Создаем плохой манифест bad-resources.yaml в папке bad-manifests без resources и применяем его:
+Создаем плохой манифест bad-registry.yaml в папке bad-manifests образом не из docker.io/library/* и применяем его:
 ```
-
-```
-ответ
-```
-
-```
-Для проверки в той же папке создадим под good-pod.yaml с заданными ресурсами и применим его:
-```
-
+kubectl apply -f bad-manifests/bad-registry.yaml
 ```
 ответ
 ```
+Error from server: error when creating "bad-manifests/bad-registry.yaml": admission webhook "validate.kyverno.svc-fail" denied the request: 
 
+resource Pod/shop/bad-registry was blocked due to the following policies 
+
+trusted-registry:
+  check-registry: 'validation failure: validation error: Образы должны быть из docker.io/library/* или shop-*. rule check-registry failed at path /image/'
+
+```
+Для проверки в той же папке создадим под good-registry.yaml и применим его:
+```
+kubectl apply -f bad-manifests/good-registry.yaml
+```
+ответ
+```
+pod/good-registry created
 ```
 убирем его:
 ```
-
+kubectl delete pod -n shop good-registry
 ```
 
-### 5. Создаем правило
+### 5. Создаем правило на шапрет тега :latest
+Защита от нестабильной версии
 В папке policies:
 ```Python
-#require-resources.yaml
+#rdisallow-latest-tag.yaml
 
 ...
-
+spec:
+     ...
+      validate:
+        message: "Запрещён тег :latest и отсутствие тега — указывайте конкретную версию"
+        foreach:
+          - list: "request.object.spec.containers"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ images.containers.{{ element.name }}.tag }}"
+                    operator: AnyIn
+                    value: ["", "latest"]
 
 ```
 Применяем политику и проверяем, что она загружена:
@@ -415,7 +446,7 @@ kubectl delete pod -n shop good-privileged
 ```
 
 ```
-Создаем плохой манифест bad-resources.yaml в папке bad-manifests без resources и применяем его:
+Создаем плохой манифест bad-latest.yaml в папке bad-manifests с образом с тегом latest и применяем его:
 ```
 
 ```
