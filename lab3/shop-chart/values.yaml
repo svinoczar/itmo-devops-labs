@@ -1,0 +1,41 @@
+api:
+  replicas: 3
+  image:
+    repository: shop-api
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "256Mi"
+  env:
+    DB_HOST: postgres
+    DB_PORT: "5432"
+    DB_NAME: shop
+    DB_USER: shop
+    DB_PASSWORD: shop
+    HEALTH_FAIL: "false"
+
+worker:
+  replicas: 2
+  image:
+    repository: shop-worker
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "300m"
+      memory: "256Mi"
+  env:
+    DB_HOST: postgres
+    DB_PORT: "5432"
+    DB_NAME: shop
+    DB_USER: shop
+    DB_PASSWORD: shop
+    POLL_INTERVAL: "5"
