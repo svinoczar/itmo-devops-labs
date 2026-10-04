@@ -13,13 +13,21 @@ spec:
               namespaces: [shop]
       validate:
         message: "Запрещены privileged контейнеры, hostNetwork, hostPID, hostPath volumes"
-        pattern:
-          spec:
-            =(hostNetwork): false
-            =(hostPID): false
-            =(volumes):
-              - X(hostPath): "null"
-            containers:
-              - securityContext:
-                  =(privileged): false
-                  =(allowPrivilegeEscalation): false
+        deny:
+          conditions:
+            any:
+              - key: "{{ request.object.spec.hostNetwork || `false` }}"
+                operator: Equals
+                value: true
+              - key: "{{ request.object.spec.hostPID || `false` }}"
+                operator: Equals
+                value: true
+              - key: "{{ request.object.spec.containers[].securityContext.privileged || `[]` }}"
+                operator: AnyIn
+                value: [true]
+              - key: "{{ request.object.spec.containers[].securityContext.allowPrivilegeEscalation || `[]` }}"
+                operator: AnyIn
+                value: [true]
+              - key: "{{ request.object.spec.volumes[].hostPath || `[]` }}"
+                operator: AnyNotIn
+                value: [null]
