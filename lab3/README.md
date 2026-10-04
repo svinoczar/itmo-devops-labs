@@ -147,7 +147,7 @@ docker.io/library/shop-api:0.1.0
 ```
 
 ## Часть 1 — Ограждения на кластер
-В качестве admission webhook выбираем Kyverno, так как язык правил привычный YAML и порог входа - низкий.
+В качестве admission webhook выбираем Kyverno, так как язык правил привычный YAML и порог входа - низкий.<br>
 Устанавливаем:
 ```
 helm repo add kyverno https://kyverno.github.io/kyverno/
@@ -240,8 +240,8 @@ pod/good-pod created
 kubectl delete pod -n shop good-pod
 ```
 
-### 2. Создаем правило на обязательные метки
-Метки - key-value в metadata.labels по которым K8s выбирает объекты.
+### 2. Создаем правило на обязательные метки <br>
+Метки - key-value в metadata.labels по которым K8s выбирает объекты. <br>
 В папке policies:
 ```Python
 #require-labels.yaml
@@ -298,10 +298,10 @@ kubectl delete pod -n shop good-labels
 ```
 
 
-### 3. Создаем правило на запрет привелегий
-Ограничение на capabilities, hostPID, сеть и тд, если это не системные компоненты.
-В папке policies:
-```Python
+### 3. Создаем правило на запрет привелегий <br>
+Ограничение на capabilities, hostPID, сеть и тд, если это не системные компоненты. <br>
+В папке policies:<br>
+```Python 
 #disallow-privileged.yaml
 
 ...
@@ -360,8 +360,8 @@ pod/good-privileged created
 kubectl delete pod -n shop good-privileged
 ```
 
-### 4. Создаем правило на создание образов только из доверенного реестра
-В папке policies:
+### 4. Создаем правило на создание образов только из доверенного реестра <br>
+В папке policies: <br>
 ```Python
 #trusted-registry.yaml
 
@@ -417,9 +417,9 @@ pod/good-registry created
 kubectl delete pod -n shop good-registry
 ```
 
-### 5. Создаем правило на шапрет тега :latest
-Защита от нестабильной версии
-В папке policies:
+### 5. Создаем правило на шапрет тега :latest <br>
+Защита от нестабильной версии <br>
+В папке policies: <br>
 ```Python
 #rdisallow-latest-tag.yaml
 
@@ -478,3 +478,30 @@ pod/good-tag created
 ```
 kubectl delete pod -n shop good-tag
 ```
+
+## Часть 2 — Чарт api и worker <br>
+Заполняем файлы папки shop-chart: 
+```
+shop-chart/
+├── Chart.yaml
+├── values.yaml
+└── templates/
+    ├── _helpers.tpl
+    ├── api-deployment.yaml
+    ├── api-service.yaml
+    └── worker-deployment.yaml
+```
+В Сhart.yaml прописываем метаданные: версию апи, имя чарта, тип, версию чарта, верчию приложение. <br>
+В values.yaml прописываем параметры для api и worker: количество реплик, ресурсы (лимиты) цпу и памяти, переменные окружения (как в сервере).
+<br>
+В api-deployment.yaml и worker-deployment.yaml прописываем: порты (только у апи), переменные окружения и ссылки на данные из values.
+<br>
+В api-service.yaml прописываем порт (selector: app: api - направляет трафик на поды с меткой api)
+<br>
+Собираем шаблоны:
+```
+helm template shop ./shop-chart --namespace shop | less
+```
+очень большой вывод, на котором видим, что Helm отрендерил три манифеста на нащих шаблонфх.<br>
+
+
