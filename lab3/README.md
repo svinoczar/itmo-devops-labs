@@ -440,29 +440,41 @@ spec:
 ```
 Применяем политику и проверяем, что она загружена:
 ```
-
+kubectl apply -f policies/disallow-latest-tag.yaml
+kubectl get clusterpolicies
 ```
 ответ
 ```
-
+clusterpolicy.kyverno.io/disallow-latest-tag created
+NAME                  ADMISSION   BACKGROUND   READY   AGE   MESSAGE
+disallow-latest-tag   true        true         True    0s    Ready
+disallow-privileged   true        true         True    12h   Ready
+require-labels        true        true         True    12h   Ready
+require-resources     true        true         True    12h   Ready
+trusted-registry      true        true         True    12h   Ready
 ```
 Создаем плохой манифест bad-latest.yaml в папке bad-manifests с образом с тегом latest и применяем его:
 ```
-
+kubectl apply -f bad-manifests/bad-latest.yaml
 ```
 ответ
 ```
+Error from server: error when creating "bad-manifests/bad-latest.yaml": admission webhook "validate.kyverno.svc-fail" denied the request: 
 
-```
-Для проверки в той же папке создадим под good-pod.yaml с заданными ресурсами и применим его:
-```
+resource Pod/shop/bad-latest was blocked due to the following policies 
 
+disallow-latest-tag:
+  check-image-tag: 'validation failure: Запрещён тег :latest и отсутствие тега — указывайте конкретную версию'
+```
+Для проверки в той же папке создадим под good-tag.yaml с заданными ресурсами и применим его:
+```
+kubectl apply -f bad-manifests/good-tag.yaml
 ```
 ответ
 ```
-
+pod/good-tag created
 ```
 убирем его:
 ```
-
+kubectl delete pod -n shop good-tag
 ```
