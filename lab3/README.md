@@ -619,7 +619,7 @@ strategy:
     maxUnavailable: 0
     maxSurge: 1
 ```
-чтобы сощдавался на 1 под больше, чем replicas, и ни один под не был удален, пока все новые не пройдут readiness.Это позволяет избежать поподания на неготовый под. <br>
+чтобы создавался на 1 под больше, чем replicas, и ни один под не был удален, пока все новые не пройдут readiness.Это позволяет избежать поподания на неготовый под. <br>
 Для проверки в api-deployment.yaml добавляем в переменные окружения:
 ```
 - name: NEW_VERSION
@@ -636,7 +636,8 @@ helm template shop ./shop-chart -n shop | grep -A2 NEW_VERSION
   value: "v1"
 readinessProbe:
 ```
-Делаем Rolling update: 1 терминал
+Делаем Rolling update. <br>
+1 терминал:
 ```
 kubectl port-forward -n shop svc/api 8000:80
 ```
@@ -667,7 +668,7 @@ done
 ```
 helm upgrade shop ./shop-chart -n shop
 ```
-ответ терминала 3:
+ответ:
 ```
 helm upgrade shop ./shop-chart -n shop
 Release "shop" has been upgraded. Happy Helming!
@@ -694,3 +695,77 @@ REVISION	UPDATED                 	STATUS    	CHART           	APP VERSION	DESCRI
 4       	Sun Oct  4 22:50:05 2026	deployed  	shop-chart-0.1.0	0.1.0      	Upgrade complete
 ```
 Rolling update прошел без простоя за ~500 запросов к /health. 
+<br>
+### 4. Сломанный релиз <br>
+maxUnavailable: 0 должно не дать убить ст арые поды, когда новые не поднимутся и оставить трафик на них
+ <br>
+Повторяем команды в 1 и 2 терминалах из прошлого пункта (запускам апи и цикл на /health-check.log),
+терминал 3 апргейдим с меткой EALTH_FAIL=true (плохой релиз):
+```
+helm upgrade shop ./shop-chart -n shop --set api.env.HEALTH_FAIL=true 
+```
+смотрим поды:
+```
+kubectl get pods -n shop -l app=api
+```
+3 старых пода обслуживают трафик, а новый под не проходит readiness
+```
+NAME                   READY   STATUS    RESTARTS      AGE
+api-84677c665b-85pf7   1/1     Running   0             28m
+api-84677c665b-rlf9d   1/1     Running   0             28m
+api-84677c665b-w6c92   1/1     Running   0             28m
+api-d6966958c-ds7g8    0/1     Running   1 (30s ago)   61s
+```
+смотрим репоикасет:
+```
+kubectl get rs -n shop -l app=api
+```
+старые все 3 живы, новый создан, но не готов к получению трафика, 
+```
+NAME             DESIRED   CURRENT   READY   AGE
+api-84677c665b   3         3         3       28m
+api-d6966958c    1         1         0       69s
+```
+В это время цикл на /health-check.log еще жив и отдает 200
+```
+23:17:22 200
+23:17:22 200
+23:17:22 200
+...
+23:27:50 200
+23:27:50 200
+23:27:50 200
+```
+Все работает, делаем откат.<br>
+Смотрим релизы:
+```
+helm history shop -n shop
+```
+ответ:
+```
+REVISION	UPDATED                 	STATUS    	CHART           	APP VERSION	DESCRIPTION     
+1       	Sun Oct  4 22:00:26 2026	superseded	shop-chart-0.1.0	0.1.0      	Install complete
+2       	Sun Oct  4 22:28:33 2026	superseded	shop-chart-0.1.0	0.1.0      	Upgrade complete
+3       	Sun Oct  4 22:30:18 2026	superseded	shop-chart-0.1.0	0.1.0      	Upgrade complete
+4       	Sun Oct  4 22:50:05 2026	superseded	shop-chart-0.1.0	0.1.0      	Upgrade complete
+5       	Sun Oct  4 23:17:53 2026	deployed  	shop-chart-0.1.0	0.1.0      	Upgrade complete
+```
+5 сломан, откатываемся на 4:
+```
+helm rollback shop 4 -n shop
+```
+ответ:
+```
+Rollback was a success! Happy Helming!
+```
+смотрим поды:
+```
+kubectl get pods -n shop -l app=api
+```
+все живы:
+```
+NAME                   READY   STATUS    RESTARTS   AGE
+api-84677c665b-85pf7   1/1     Running   0          40m
+api-84677c665b-rlf9d   1/1     Running   0          40m
+api-84677c665b-w6c92   1/1     Running   0          41m
+```
