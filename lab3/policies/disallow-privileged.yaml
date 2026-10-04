@@ -1,0 +1,25 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-privileged
+spec:
+  validationFailureAction: Enforce
+  rules:
+    - name: check-privileged
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [shop]
+      validate:
+        message: "Запрещены privileged контейнеры, hostNetwork, hostPID, hostPath volumes"
+        pattern:
+          spec:
+            =(hostNetwork): false
+            =(hostPID): false
+            =(volumes):
+              - X(hostPath): "null"
+            containers:
+              - securityContext:
+                  =(privileged): false
+                  =(allowPrivilegeEscalation): false

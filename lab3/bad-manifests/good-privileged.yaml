@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: good-privileged
+  namespace: shop
+  labels:
+    app: demo
+    owner: maria
+spec:
+  containers:
+    - name: app
+      image: nginx
+      resources:
+        limits:
+          cpu: "100m"
+          memory: "128Mi"
+      securityContext:
+        privileged: false
+        allowPrivilegeEscalation: false
