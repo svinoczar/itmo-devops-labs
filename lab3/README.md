@@ -479,7 +479,8 @@ pod/good-tag created
 kubectl delete pod -n shop good-tag
 ```
 
-## Часть 2 — Чарт api и worker <br>
+## Часть 2 — Чарт api и worker <br> <br>
+### 1. Создаем чарты <br>
 Заполняем файлы папки shop-chart: 
 ```
 shop-chart/
@@ -567,5 +568,129 @@ kubectl logs -n shop -l app=api --tail=200 | grep "order created"
 {"time": "2026-10-04 19:04:59,265", "level": "INFO", "message": "order created", "name": "api", "order_id": 1, "item": "apple"}
 {"time": "2026-10-04 19:05:06,721", "level": "INFO", "message": "order created", "name": "api", "order_id": 2, "item": "banana"}
 ```
-api успешно создал два заказа и залогировал их в JSON с полями.
-
+api успешно создал два заказа и залогировал их в JSON с полями. <br>
+<br>
+### 2. Reconciliation <br>
+Удаляем под:
+```
+kubectl delete pod -n shop api-f6866b5d9-fhjr2
+```
+смотрим поды:
+```
+NAME                  READY   STATUS    RESTARTS      AGE
+api-f6866b5d9-7jqgq   1/1     Running   0             9s
+api-f6866b5d9-hckcv   1/1     Running   1 (24m ago)   24m
+api-f6866b5d9-tqt6m   1/1     Running   1 (24m ago)   24m
+```
+ReplicaSet тут же создал новый.<br>
+Меняем replicas в values.yaml на 5, применяем:
+```
+helm upgrade shop ./shop-chart -n shop
+```
+видим новый релиз после изменнеий:
+```
+Release "shop" has been upgraded. Happy Helming!
+NAME: shop
+LAST DEPLOYED: Sun Oct  4 22:28:33 2026
+NAMESPACE: shop
+STATUS: deployed
+REVISION: 2
+```
+смотрим поды:
+```
+kubectl get pods -n shop -l app=api
+```
+```
+NAME                  READY   STATUS    RESTARTS      AGE
+api-f6866b5d9-7jqgq   1/1     Running   0             4m27s
+api-f6866b5d9-cfjvf   1/1     Running   0             56s
+api-f6866b5d9-hckcv   1/1     Running   1 (29m ago)   29m
+api-f6866b5d9-jt7q8   1/1     Running   0             56s
+api-f6866b5d9-tqt6m   1/1     Running   1 (29m ago)   29m
+```
+стало 5 штукав)<br>
+<br>
+### 3. Rolling update <br>
+В yaml мы прописали:
+```
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 0
+    maxSurge: 1
+```
+чтобы сощдавался на 1 под больше, чем replicas, и ни один под не был удален, пока все новые не пройдут readiness.Это позволяет избежать поподания на неготовый под. <br>
+Для проверки в api-deployment.yaml добавляем в переменные окружения:
+```
+- name: NEW_VERSION
+  value: {{ .Values.api.env.NEW_VERSION | default "v1" | quote }}
+```
+При helm upgrade получим новую версию. <br>
+Добавляем NEW_VERSION в переменные окружения апи в values.yaml и рендерим:
+```
+helm template shop ./shop-chart -n shop | grep -A2 NEW_VERSION
+```
+корректно:
+```
+- name: NEW_VERSION
+  value: "v1"
+readinessProbe:
+```
+Делаем Rolling update: 1 терминал
+```
+kubectl port-forward -n shop svc/api 8000:80
+```
+цикл на /health во 2 терминале:
+```
+while true; do
+  code=$(curl -s -o /dev/null -w "%{http_code}" localhost:8000/health)
+  echo "$(date +%H:%M:%S) $code" | tee -a /tmp/health-check.log
+  sleep 0.2
+done
+```
+видим:
+```
+...
+22:49:57 200
+22:49:57 200
+22:49:58 200
+22:49:58 200
+22:49:58 200
+22:49:58 200
+22:49:59 200
+22:49:59 200
+22:49:59 200
+22:49:59 200
+...
+```
+новую версию в терминале 3:
+```
+helm upgrade shop ./shop-chart -n shop
+```
+ответ терминала 3:
+```
+helm upgrade shop ./shop-chart -n shop
+Release "shop" has been upgraded. Happy Helming!
+NAME: shop
+LAST DEPLOYED: Sun Oct  4 22:50:05 2026
+NAMESPACE: shop
+STATUS: deployed
+REVISION: 4
+```
+Смотрим поды:
+```
+kubectl get rs -n shop -l app=api
+helm history shop -n shop
+```
+Deployment создал новый ReplicaSet 84677c665b (старый f6866b5d9 остался без подов).
+```
+NAME             DESIRED   CURRENT   READY   AGE
+api-84677c665b   3         3         3       61s
+api-f6866b5d9    0         0         0       50m
+REVISION	UPDATED                 	STATUS    	CHART           	APP VERSION	DESCRIPTION     
+1       	Sun Oct  4 22:00:26 2026	superseded	shop-chart-0.1.0	0.1.0      	Install complete
+2       	Sun Oct  4 22:28:33 2026	superseded	shop-chart-0.1.0	0.1.0      	Upgrade complete
+3       	Sun Oct  4 22:30:18 2026	superseded	shop-chart-0.1.0	0.1.0      	Upgrade complete
+4       	Sun Oct  4 22:50:05 2026	deployed  	shop-chart-0.1.0	0.1.0      	Upgrade complete
+```
+Rolling update прошел без простоя за ~500 запросов к /health. 
