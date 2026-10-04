@@ -491,17 +491,81 @@ shop-chart/
     ├── api-service.yaml
     └── worker-deployment.yaml
 ```
-В Сhart.yaml прописываем метаданные: версию апи, имя чарта, тип, версию чарта, верчию приложение. <br>
-В values.yaml прописываем параметры для api и worker: количество реплик, ресурсы (лимиты) цпу и памяти, переменные окружения (как в сервере).
+В **Сhart.yaml** прописываем метаданные: версию апи, имя чарта, тип, версию чарта, верчию приложение. <br>
+В **values.yaml** прописываем параметры для api и worker: количество реплик, ресурсы (лимиты) цпу и памяти, переменные окружения (как в сервере).
 <br>
-В api-deployment.yaml и worker-deployment.yaml прописываем: порты (только у апи), переменные окружения и ссылки на данные из values.
+В **api-deployment.yaml** и **worker-deployment.yaml** прописываем: порты (только у апи), переменные окружения и ссылки на данные из values.
 <br>
-В api-service.yaml прописываем порт (selector: app: api - направляет трафик на поды с меткой api)
+В **api-service.yaml** прописываем порт (selector: app: api - направляет трафик на поды с меткой api)
 <br>
 Собираем шаблоны:
 ```
 helm template shop ./shop-chart --namespace shop | less
 ```
-очень большой вывод, на котором видим, что Helm отрендерил три манифеста на нащих шаблонфх.<br>
+очень большой вывод, на котором видим, что Helm отрендерил три манифеста на нащих шаблонах.<br>
+<br>
+Так как сервера при запуске будут посылать запросы на postgres.shop.svc:5432, а у нас такого сервиса в кластере нет - его надо поставить. Ставим мини-деплоймент с Postgres.<br>
+В той же папке создаем **postgres.yaml**.<br>
+Устанавливаем:
+```
+helm install shop ./shop-chart -n shop --create-namespace
+```
+создался под:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab3$ cd ~/itmo-devops-labs/lab3
+helm install shop ./shop-chart -n shop
+NAME: shop
+LAST DEPLOYED: Sun Oct  4 22:00:26 2026
+NAMESPACE: shop
+STATUS: deployed
+REVISION: 1
+```
+проверяем поды:
+```
+kubectl get pods -n shop
+```
+поды установлены 3 апи и 2 воркер и 1 субд:
+```
+NAME                       READY   STATUS    RESTARTS      AGE
+api-f6866b5d9-fhjr2        1/1     Running   1 (30s ago)   33s
+api-f6866b5d9-hckcv        1/1     Running   1 (30s ago)   33s
+api-f6866b5d9-tqt6m        1/1     Running   1 (30s ago)   33s
+postgres-b5d6fc86b-pgbk9   1/1     Running   0             33s
+worker-5966f547dd-dgxjl    1/1     Running   0             33s
+worker-5966f547dd-lwrkd    1/1     Running   0             33s
+```
+Проверяем функционал, запускаем сервер и делаем запросы:
+```
+kubectl port-forward -n shop svc/api 8000:80
+```
+ответы:
+```
+curl localhost:8000/health
+{"status":"ok"}
 
+curl -X POST localhost:8000/order -H 'Content-Type: application/json' -d '{"item":"apple"}'item":"apple"}'
+{"id":1,"status":"created"}
+
+curl -X POST localhost:8000/order -H 'Content-Type: application/json' -d '{"item":"banana"}'son' -d '{"item":"banana"}'
+{"id":2,"status":"created"}
+
+curl localhost:8000/orders
+[{"id":2,"item":"banana","status":"processed","created_at":"2026-10-04T19:05:06.710439+00:00"},{"id":1,"item":"apple","status":"processed","created_at":"2026-10-04T19:04:59.251457+00:00"}]
+```
+смотрим обработал ли воркер:
+```
+curl localhost:8000/orders
+[{"id":2,"item":"banana","status":"processed","created_at":"2026-10-04T19:05:06.710439+00:00"},{"id":1,"item":"apple","status":"processed","created_at":"2026-10-04T19:04:59.251457+00:00"}
+```
+все работает, статусы processed.
+Проверяем логи:
+```
+kubectl logs -n shop -l app=api --tail=200 | grep "order created"
+```
+ответ 
+```
+{"time": "2026-10-04 19:04:59,265", "level": "INFO", "message": "order created", "name": "api", "order_id": 1, "item": "apple"}
+{"time": "2026-10-04 19:05:06,721", "level": "INFO", "message": "order created", "name": "api", "order_id": 2, "item": "banana"}
+```
+api успешно создал два заказа и залогировал их в JSON с полями.
 
