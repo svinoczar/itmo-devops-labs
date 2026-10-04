@@ -18,6 +18,7 @@ api:
     DB_USER: shop
     DB_PASSWORD: shop
     HEALTH_FAIL: "false"
+    NEW_VERSION: "v1"     
 
 worker:
   replicas: 2

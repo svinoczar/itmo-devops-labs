@@ -41,6 +41,8 @@ spec:
               value: {{ .Values.api.env.DB_PASSWORD | quote }}
             - name: HEALTH_FAIL
               value: {{ .Values.api.env.HEALTH_FAIL | quote }}
+            - name: NEW_VERSION
+              value: {{ .Values.api.env.NEW_VERSION | default "v1" | quote }}
           readinessProbe:
             httpGet:
               path: /health
