@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import psycopg
 from pythonjsonlogger import jsonlogger
+from prometheus_fastapi_instrumentator import Instrumentator
 
 #логирование для мониторинга
 handler = logging.StreamHandler()
@@ -25,6 +26,7 @@ DB_PASSWORD = os.getenv("DB_PASSWORD", "shop")
 HEALTH_FAIL = os.getenv("HEALTH_FAIL", "false").lower() == "true"
 
 app = FastAPI()
+Instrumentator().instrument(app).expose(app)
 
 #Pydantic для POST /order - отвечает 422 на неккоректные данные пользователя
 class OrderIn(BaseModel):

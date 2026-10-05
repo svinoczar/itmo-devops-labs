@@ -11,5 +11,6 @@ spec:
     app: api
   ports:
     - port: 80
+      name: http
       targetPort: 8000
   type: ClusterIP

@@ -1,0 +1,46 @@
+{{- if .Values.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: shop-alerts
+  namespace: {{ .Release.Namespace }}
+  labels:
+    release: kube-prom
+    app: shop
+    owner: shop
+spec:
+  groups:
+    - name: shop.rules
+      rules:
+        - alert: ApiDown
+          expr: up{job="api"} == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Api недоступен"
+            description: "Prometheus не может скрейпить api более 1 минуты"
+
+        - alert: ApiHighErrorRate
+          expr: |
+            sum(rate(http_requests_total{status=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total[5m]))
+            > 0.05
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Api: доля 5xx > 5%"
+            description: "Более 5% запросов к api падают с 5xx за 5 минут"
+
+        - alert: PostgresNotReady
+          expr: |
+            kube_pod_status_ready{namespace="shop", pod=~"postgres-.*", condition="true"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Postgres не Ready"
+            description: "Под Postgres не готов более 2 минут"
+{{- end }}
