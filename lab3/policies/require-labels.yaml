@@ -11,6 +11,12 @@ spec:
           - resources:
               kinds: [Pod]
               namespaces: [shop]
+      exclude:
+        any:
+          - resources:
+              selector:
+                matchLabels:
+                  cnpg.io/cluster: "?*"      
       validate:
         message: "Pod должен иметь метки 'app' и 'owner'"
         pattern:

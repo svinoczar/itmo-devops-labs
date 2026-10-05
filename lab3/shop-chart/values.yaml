@@ -12,7 +12,7 @@ api:
       cpu: "500m"
       memory: "256Mi"
   env:
-    DB_HOST: postgres
+    DB_HOST: postgres-rw
     DB_PORT: "5432"
     DB_NAME: shop
     DB_USER: shop

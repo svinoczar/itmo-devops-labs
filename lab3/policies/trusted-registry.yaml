@@ -11,6 +11,12 @@ spec:
           - resources:
               kinds: [Pod]
               namespaces: [shop]
+      exclude:
+        any:
+          - resources:
+              selector:
+                matchLabels:
+                  cnpg.io/cluster: "?*"
       validate:
         message: "Образы должны быть из docker.io/library/* или shop-*"
         foreach:

@@ -11,6 +11,12 @@ spec:
           - resources:
               kinds: [Pod]
               namespaces: [shop]
+      exclude:
+        any:
+          - resources:
+              selector:
+                matchLabels:
+                  cnpg.io/cluster: "?*"
       validate:
         message: "Запрещён тег :latest и отсутствие тега — указывайте конкретную версию"
         foreach:
