@@ -146,7 +146,7 @@ docker.io/library/shop-worker:0.1.0
 docker.io/library/shop-api:0.1.0
 ```
 
-## Часть 1 — Ограждения на кластер
+## Часть 1 — Ограждения на кластер <br>
 В качестве admission webhook выбираем Kyverno, так как язык правил привычный YAML и порог входа - низкий.<br>
 Устанавливаем:
 ```
@@ -479,7 +479,7 @@ pod/good-tag created
 kubectl delete pod -n shop good-tag
 ```
 
-## Часть 2 — Чарт api и worker <br> <br>
+## Часть 2 — Чарт api и worker <br> 
 ### 1. Создаем чарты <br>
 Заполняем файлы папки shop-chart: 
 ```
@@ -770,7 +770,7 @@ api-84677c665b-rlf9d   1/1     Running   0          40m
 api-84677c665b-w6c92   1/1     Running   0          41m
 ```
 
-## Часть 3 — Postgres через оператора <br> <br>
+## Часть 3 — Postgres через оператора <br> 
 ### 1.Разворачиваем оператор БД на кластере <br>
 Сечас у нас Postgres - Deployment в чарте, который при удалении пода приведет к потере данных. Нет резервных копий и обновление версии нужно делать вручную.<br>
 Эту проблему решает оператор (CRD (Custom Resource Definition) + контроллер). CRD — это новый тип объекта в Kubernetes. Описывается желаемое состояние БД и Контроллер (процесс) приводит реальность к желаемому (создает StatefulSet с репликами Postgres, Service для доступа, Secret с паролем, поднимает поды, обновляет версии-rolling update).<br>
@@ -927,7 +927,7 @@ status:
 <br>
 юююху -3 (да кринж, но че поделать)<br>
 
-## Часть 4 — Падение control plane<br> <br>
+## Часть 4 — Падение control plane<br>
 Control plane - начальник коастера, поэтому мы его щас делитним, чтобы понять чем это черевато (ну мы уже знаем из лекции, но на слово верить нельзя). <br>
 1. Фиксим состояние до:
 ```
@@ -1020,4 +1020,150 @@ STATUS: deployed
 REVISION: 13
 ```
 все сново работает.
+<br>
 
+## Часть 5 — Мониторинг<br>
+1. Добавить в апи<br>
+- prometheus-fastapi-instrumentator в api/requirements.txt <br>
+- в api/main.pu добавляем импорт from prometheus_fastapi_instrumentator import Instrumentator и Instrumentator().instrument(app).expose(app) (для регистрации эндпоинта /metrics) <br>
+2. Пересобираем образ:
+```
+cd ~/itmo-devops-labs/lab3/api
+docker build -t shop-api:0.1.0 .
+minikube image load shop-api:0.1.0
+```
+3. Перезапускаем поды:
+```
+kubectl delete pod -n shop -l app=api
+```
+4. Проверяем /metrics:
+```
+1 терминал
+kubectl delete pod -n shop -l app=api
+2 терминал
+kubectl get pods -n shop -l app=api -w
+```
+```
+...
+# HELP http_requests_total Total number of requests by method, status and handler.
+# TYPE http_requests_total counter
+http_requests_total{handler="/health",method="GET",status="2xx"} 5.0
+...
+```
+метрики (RED), которые будет скрейпить Prometheus через ServiceMonitor.<br>
+
+Проверяем гистограмму:
+```
+# HELP http_request_duration_seconds Latency with only few buckets by handler. Made to be only used if aggregation by handler is important. 
+# TYPE http_request_duration_seconds histogram
+http_request_duration_seconds_bucket{handler="/health",le="0.1",method="GET"} 61.0
+http_request_duration_seconds_bucket{handler="/health",le="0.5",method="GET"} 61.0
+http_request_duration_seconds_bucket{handler="/health",le="1.0",method="GET"} 61.0
+```
+5. Создаем shop-chart/templates/servicemonitor.yaml и prometheusrule.yaml. <br>
+6. Добавляем в вальюс:
+```Python
+serviceMonitor:
+  enabled: true
+
+prometheusRule:
+  enabled: true
+```
+7. В api-service.yaml добавляем имя порту:
+```Python
+  ports:
+    - name: http
+```
+8. Апргрейдим хелм:
+```
+cd ~/itmo-devops-labs/lab3
+helm upgrade shop ./shop-chart -n shop
+
+ответ:
+helm upgrade shop ./shop-chart -n shop
+Release "shop" has been upgraded. Happy Helming!
+NAME: shop
+LAST DEPLOYED: Mon Oct  5 13:34:19 2026
+NAMESPACE: shop
+STATUS: deployed
+REVISION: 15
+```
+9. Запускаем прометеус:
+```
+kubectl port-forward -n monitoring svc/kube-prom-kube-prometheus-prometheus 9090:9090
+```
+смотрим http://localhost:9090/targets: <br>
+<img width="1339" height="1249" alt="изображение" src="https://github.com/user-attachments/assets/3ac86ff0-ec0f-4c31-a469-49d20ebaff4d" />  <br>
+смотрим http://localhost:9090/graph: <br>
+<img width="1354" height="828" alt="изображение" src="https://github.com/user-attachments/assets/e16ef903-16f6-4601-b307-59984bdbedd9" />  <br>
+метрики идут в Prometheus - RED собирается.
+смотрим http://localhost:9090/alerts:
+<img width="1338" height="511" alt="изображение" src="https://github.com/user-attachments/assets/be2de486-d775-45eb-a5d2-d09503611c34" /> <br>
+все 3 алерта shop на месте. <br>
+Обоснование: <br>
+- ApiDown - сервис не отвечает (отлавливает когда api недоступен или все поды не проходят readiness)  <br>
+- ApiHighErrorRate - доля 5xx > 5% (отлавливает когда больше 5% запросов за последние 5 минут падают с 5xx)  <br>
+- PostgresNotReady — под Postgres не готов (отлавливает когда под Postgres не готов к работе больше 2 минут)  <br>
+10. Провоцируем алерт по ApiHighErrorRate.
+Останавливаем оператор CNPG:
+```
+kubectl scale deployment -n cnpg-system cnpg-cloudnative-pg --replicas=0
+```
+под оператора удалился, оператор не восстоновит Postgres.  <br>
+Удаляем под Postgres:
+```
+kubectl delete pod -n shop postgres-1
+```
+Смотрим запросы по /order:
+```
+HTTP/1.1 500 Internal Server Error
+date: Mon, 05 Oct 2026 15:00:58 GMT
+server: uvicorn
+content-length: 21
+content-type: text/plain; charset=utf-8
+
+Internal Server Error
+```
+возвращает ошибку. <br>
+Запускаем бесконечный цикл спамов:
+```
+while true; do
+  curl -s -o /dev/null -X POST localhost:8001/order \
+    -H 'Content-Type: application/json' -d '{"item":"x"}'
+  sleep 0.1
+done
+```
+1.
+```
+kubectl port-forward -n monitoring svc/kube-prom-kube-prometheus-prometheus 9090:9090
+```
+Смотрим Prometheus: http://localhost:9090/alerts  <br>
+<img width="1313" height="528" alt="изображение" src="https://github.com/user-attachments/assets/cfeeff5c-e523-4c00-a164-006583c14120" />  <br>
+ApiHighErrorRate - FIRING <br>
+2.
+```
+kubectl port-forward -n monitoring svc/kube-prom-kube-prometheus-alertmanager 9093:9093
+```
+Смотрим Alertmanager: http://localhost:9093 <br>
+<img width="1371" height="661" alt="изображение" src="https://github.com/user-attachments/assets/3a2e2a4c-6263-4995-a4f2-c213f8218528" /> <br>
+наш первый
+3. 
+```
+kubectl port-forward -n monitoring svc/karma 8080:8080
+``` 
+Смотрим Karma: http://localhost:8080  <br>
+<img width="1378" height="523" alt="изображение" src="https://github.com/user-attachments/assets/ff897af0-98d3-41dd-892c-b38c52425901" /> <br>
+дашборд с FIRING, наш алерт второй. <br>
+<br>
+Прибираемся:
+```
+Возвращаем оператор CNPG
+kubectl scale deployment -n cnpg-system cnpg-cloudnative-pg --replicas=1
+Перезапускаем апи
+kubectl delete pod -n shop -l app=api
+sleep 30
+kubectl get pods -n shop -l app=api
+```
+Проверили поды - все 1/1. <br>
+<br>
+Коооонец!
