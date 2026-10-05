@@ -834,6 +834,11 @@ REVISION: 9
                   cnpg.io/cluster: "?*"
 ```
 чтобы объекты с CloudNativePG не проверялись правилами (у них нет меток, образ не из указанного репозитория).
+<br>
+Если често, я вообще не выкупила че происходит и почему все падает, но дипсик помог, а я в это время просто: <br>
+<img width="1080" height="1080" alt="изображение" src="https://github.com/user-attachments/assets/3c7f5919-dd0c-46ed-87b0-2f7d45e21bb2" />
+
+
 Cluster создан, апи поднялся:
 ```
 NAME                      READY   STATUS    RESTARTS       AGE 
@@ -914,12 +919,105 @@ status:
 Что видим:
 1. Мы прописали, что хотим: 1 инстанс Postgres, 1 GiB storage, базу shop, юзера shop, пароль из Secret. <br>
 2. В статус записывается отчет оператора о том, что сделано. <br>
-<br>
+
 ### 3.Отличие оператора от controller-manager <br>
 - controller-manager встроен в кубер  (под в кубере,  является одним из control plane компонентов) <br>
 - оператор - расширение кубера, которое является совокупностью контроллера (под, который следит за CRD и приводит их к желаемому состоянию) и самих CRD-объектов (новый тип объектов сервера апи)
 оператор делает очень большой пласт работы самостоятельно: резервные копии, подъемы при падениях и тп
 <br>
-ю-ху -3)<br>
+юююху -3 (да кринж, но че поделать)<br>
 
 ## Часть 4 — Падение control plane<br> <br>
+Control plane - начальник коастера, поэтому мы его щас делитним, чтобы понять чем это черевато (ну мы уже знаем из лекции, но на слово верить нельзя). <br>
+1. Фиксим состояние до:
+```
+kubectl get pods -n shop
+kubectl get nodes
+```
+```
+NAME                      READY   STATUS    RESTARTS       AGE
+api-676898b8-lwjdw        1/1     Running   0              39m
+api-676898b8-nxxrp        1/1     Running   20 (44m ago)   117m
+api-676898b8-qfzgp        1/1     Running   0              39m
+postgres-1                1/1     Running   0              26m
+worker-5966f547dd-dgxjl   1/1     Running   0              14h
+worker-5966f547dd-lwrkd   1/1     Running   0              14h
+NAME       STATUS   ROLES           AGE   VERSION
+minikube   Ready    control-plane   12d   v1.37.0
+```
+2. Останавливае апи сервер:<br>
+на этом этапе новый дроп:<br>
+сбой control plane в minikube не сработает через systemctl stop kubelet, так как kubelet внутри minikube - это один процесс, запущенный через systemd, а apiserver - контейнер, который запускается через манифест кубелетом. При остановке kubelet остановился, а его дети-поды остались живы в containerd.<br>
+
+Заходим в миникуб и останавливаем кубелет:
+```
+minikube ssh
+sudo systemctl stop kubelet
+```
+Убиваем сервер:
+```
+CID=$(sudo crictl ps --name kube-apiserver -q)
+echo "Stopping apiserver: $CID"
+sudo crictl stop $CID
+```
+Смотрим:
+```
+sudo crictl ps | grep apiserver
+
+ответ: пусто
+```
+апи сервер бобик сдох, а поды живы
+```
+sudo crictl ps | grep -E 'api|worker|postgres'
+
+ответ:
+0b9e82da1674d       b1a257270af7e       59 minutes ago      Running             postgres                  0                   84f6759cc4522       postgres-1                                              shop
+3eb64bd383484       d5b15fe715bb8       About an hour ago   Running             api                       0                   5d29e7686cc63       api-676898b8-qfzgp                                      shop
+a5e76964cdbda       d5b15fe715bb8       About an hour ago   Running             api                       0                   c37bafb54ce8f       api-676898b8-lwjdw                                      shop
+0d4e0917ca250       d5b15fe715bb8       About an hour ago   Running             api                       20                  3c85fdb8592f4       api-676898b8-nxxrp                                      shop
+20464070a2e2f       553caf23e31dc       15 hours ago        Running             worker                    0                   6e6fe0923b496       worker-5966f547dd-lwrkd                                 shop
+a25483ba9fb54       553caf23e31dc       15 hours ago        Running             worker                    0                   23a140bb593a3       worker-5966f547dd-dgxjl                                 shop
+```
+Во втором терминале (снаружи миникуба):
+```
+kubectl get pods -n shop
+helm upgrade shop ./shop-chart -n shop
+
+ответ:
+The connection to the server 172.17.0.3:8443 was refused - did you specify the right host or port?
+Error: UPGRADE FAILED: Kubernetes cluster unreachable: Get "https://172.17.0.3:8443/version": dial tcp 172.17.0.3:8443: connect: connection refused
+```
+Инсайт: Data plane продолжает работать, когда control plane лежит. <br>
+
+3. Возвращаем кубелет<br>
+В миникубе:
+```
+sudo systemctl start kubelet
+exit
+```
+Снаружи:
+```
+kubectl get nodes
+kubectl get pods -n shop
+helm upgrade shop ./shop-chart -n shop
+```
+видим:
+```
+NAME       STATUS   ROLES           AGE   VERSION
+minikube   Ready    control-plane   12d   v1.37.0
+NAME                      READY   STATUS    RESTARTS       AGE
+api-676898b8-lwjdw        1/1     Running   0              78m
+api-676898b8-nxxrp        1/1     Running   20 (83m ago)   156m
+api-676898b8-qfzgp        1/1     Running   0              78m
+postgres-1                1/1     Running   0              64m
+worker-5966f547dd-dgxjl   1/1     Running   0              15h
+worker-5966f547dd-lwrkd   1/1     Running   0              15h
+Release "shop" has been upgraded. Happy Helming!
+NAME: shop
+LAST DEPLOYED: Mon Oct  5 13:02:45 2026
+NAMESPACE: shop
+STATUS: deployed
+REVISION: 13
+```
+все сново работает.
+
