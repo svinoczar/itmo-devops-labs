@@ -1,5 +1,6 @@
 package main
 
+//добавил коммент для пересборки
 import (
 	"fmt"
 	"net/http"

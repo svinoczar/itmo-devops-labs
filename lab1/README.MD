@@ -550,3 +550,337 @@ alpine  \
 
 /health отдаёт ок, приложение работает, отлично.
 
+### Так, теперь сравним самостоятельное создание контейнера с тем, что делает Docker.
+- **Namespaces**
+
+    В обоих случаях мы изолируем пространства имён.
+- **Cgroup**
+
+    В обоих случаях ограничения поребления ресурсов делается через запись  в cgroup.
+- Изоляция файловой системы
+
+    При самостоятельном создании контейнера я использовал chroot, чтобы создать отдельную файловую систему. В скрипт этот шаг не вошёл, поэтому там наш процесс находится в домашней директории хоста. 
+
+    Docker же всегда монтирует для контейнера отдельную корневую файловую систему. 
+
+- **Capabilities**
+
+    При самостоятельном создании контейнера нужно ручками сбрасывать лишние права. 
+    
+    Но если мы используем флаг ```--user```, то пространство имен изменяется и внутри контейнера наш root - простой юзер на хосте. И сколько не выставляй разрешающие права, обойти это правило не получится. 
+
+    Docker тоже сбрасывает лишние capabilities для нового контейнера.  
+- **Seccomp**
+
+    При стандартном создании контейнера, нужно вручную выставлять ограничения в Seccomp. 
+
+    В то же время Docker по умолчанию блокирует самые опысные системные вызовы.
+
+#### А вот что Docker делает дополнительно:
+
+- Создает фонового демона контейнера, который посволяет собирать логи, перезапускать контейнер, управлять томами
+
+- Создает по умолчанию сеть: настраивает виртуальные интерфейсы на хосте и в контейнере, подключает их к мосту, настраивает фаервол для проброса портов.
+
+- Использует слоистые файловые системы, что позволяет переиспользовать ресурсы и экономить место.
+
+- Встроенная дистрибуция образов
+
+## Step 6: Добавляем образ
+
+Напишем обычный докерфайл:
+
+```bash
+FROM golang:1.22
+WORKDIR /app
+COPY ./service/ .
+RUN go build -o api ./main.go
+CMD ["/app/api"]
+```
+
+И соберем контейнер командой:
+```bash
+sudo docker build -t api-single .
+```
+
+Смотрим ответ:
+```bash
+DEPRECATED: The legacy builder is deprecated and will be removed in a future release.
+            Install the buildx component to build images with BuildKit:
+            https://docs.docker.com/go/buildx/
+
+Sending build context to Docker daemon  54.59MB
+Step 1/5 : FROM golang:1.27.1
+1.27.1: Pulling from library/golang
+Digest: sha256:e0174e51e81218523251d85d248a90d24c3d5e81543b4f07a5d66229397db190
+Status: Downloaded newer image for golang:1.27.1
+ ---> e0174e51e812
+Step 2/5 : WORKDIR /app
+ ---> Running in aed4074b4715
+ ---> Removed intermediate container aed4074b4715
+ ---> a84de7bf6d88
+Step 3/5 : COPY ./service/ .
+ ---> 4ab0356a87fa
+Step 4/5 : RUN go build -o api ./main.go
+ ---> Running in 19535b6c8247
+ ---> Removed intermediate container 19535b6c8247
+ ---> e44fa4a317c3
+Step 5/5 : CMD ["/app/api"]
+ ---> Running in 6f6bcc86b1ac
+ ---> Removed intermediate container 6f6bcc86b1ac
+ ---> 934a43bb6d0e
+Successfully built 934a43bb6d0e
+Successfully tagged api-single:latest
+```
+
+Теперь напишем мультистейдж докерфайл:
+```bash
+FROM golang:1.22 AS builder
+WORKDIR /app
+COPY ./service/ .
+RUN CGO_ENABLED=0 GOOS=linux go build -o api ./main.go
+
+
+FROM scratch
+COPY --from=builder /app/api /api
+CMD ["/api"]
+```
+
+Он качает все зависимости и собирает наш бинарник, но в контейнер дальше передает только слой с уже собранным бинарником.
+
+Соберем мультистейдж образ:
+```bash
+sudo docker build -f Dockerfile.multi -t api-multi .
+```
+
+Ответ:
+```bash
+DEPRECATED: The legacy builder is deprecated and will be removed in a future release.
+            Install the buildx component to build images with BuildKit:
+            https://docs.docker.com/go/buildx/
+
+Sending build context to Docker daemon   54.6MB
+Step 1/7 : FROM golang:1.27.1 AS builder
+ ---> e0174e51e812
+Step 2/7 : WORKDIR /app
+ ---> Using cache
+ ---> a84de7bf6d88
+Step 3/7 : COPY ./service/ .
+ ---> Using cache
+ ---> 4ab0356a87fa
+Step 4/7 : RUN CGO_ENABLED=0 GOOS=linux go build -o api ./main.go
+ ---> Running in c9af878dfd5c
+ ---> Removed intermediate container c9af878dfd5c
+ ---> 99f6ce55eade
+Step 5/7 : FROM scratch
+ ---> 
+Step 6/7 : COPY --from=builder /app/api /api
+ ---> f63a54c7630d
+Step 7/7 : CMD ["/api"]
+ ---> Running in 33617a8ba2b0
+ ---> Removed intermediate container 33617a8ba2b0
+ ---> a3eddf025143
+Successfully built a3eddf025143
+Successfully tagged api-multi:latest
+```
+
+#### Теперь самое интересное - а сколько ресурсов занимает каждый образ?
+
+Image аж в 72 раза меньше занимает:
+```bash
+sudo docker image ls
+
+IMAGE               ID             DISK USAGE   CONTENT SIZE   EXTRA
+api-multi:latest    a3eddf025143       13.6MB         4.96MB        
+api-single:latest   934a43bb6d0e       1.47GB          360MB 
+
+```
+
+А слоёв ожидаемо 15шт в single против 2 слоев в multi:
+```bash
+sudo docker history api-single:latest
+
+IMAGE          CREATED          CREATED BY                                      SIZE      COMMENT
+934a43bb6d0e   14 minutes ago   /bin/sh -c #(nop)  CMD ["/app/api"]             0B        
+e44fa4a317c3   14 minutes ago   /bin/sh -c go build -o api ./main.go            101MB     
+4ab0356a87fa   14 minutes ago   /bin/sh -c #(nop) COPY dir:a3e78e12b11b73ddf…   26.6MB    
+a84de7bf6d88   14 minutes ago   /bin/sh -c #(nop) WORKDIR /app                  8.19kB    
+e0174e51e812   2 weeks ago      WORKDIR /go                                     4.1kB     buildkit.dockerfile.v0
+<missing>      2 weeks ago      RUN /bin/sh -c mkdir -p "$GOPATH/src" $GOPA…    16.4kB    buildkit.dockerfile.v0
+<missing>      2 weeks ago      COPY /target/ / # buildkit                      296MB     buildkit.dockerfile.v0
+<missing>      2 weeks ago      ENV PATH=/go/bin:/usr/local/go/bin:/usr/loca…   0B        buildkit.dockerfile.v0
+<missing>      2 weeks ago      ENV GOPATH=/go                                  0B        buildkit.dockerfile.v0
+<missing>      2 weeks ago      ENV GOTOOLCHAIN=local                           0B        buildkit.dockerfile.v0
+<missing>      2 weeks ago      ENV GOLANG_VERSION=1.27.1                       0B        buildkit.dockerfile.v0
+<missing>      2 weeks ago      RUN /bin/sh -c set -eux;  apt-get update;  a…   287MB     buildkit.dockerfile.v0
+<missing>      2 weeks ago      RUN /bin/sh -c set -eux;  apt-get update;  a…   202MB     buildkit.dockerfile.v0
+<missing>      2 weeks ago      RUN /bin/sh -c set -eux;  apt-get update;  a…   65MB      buildkit.dockerfile.v0
+<missing>      2 weeks ago      # debian.sh --arch 'amd64' out/ 'trixie' '@1…   134MB     debuerreotype 0.17
+
+sudo docker history api-multi:latest
+IMAGE          CREATED         CREATED BY                                      SIZE      COMMENT
+a3eddf025143   5 minutes ago   /bin/sh -c #(nop)  CMD ["/api"]                 0B        
+f63a54c7630d   5 minutes ago   /bin/sh -c #(nop) COPY file:a3a5137567e477d7…   8.61MB    
+
+```
+
+А теперь сравним кэширование. 
+
+Попробую заново выполнить сборку, но ничего не меняя в файлах:
+```bash
+Sending build context to Docker daemon   54.6MB
+Step 1/7 : FROM golang:1.27.1 AS builder
+ ---> e0174e51e812
+Step 2/7 : WORKDIR /app
+ ---> Using cache
+ ---> a84de7bf6d88
+Step 3/7 : COPY ./service/ .
+ ---> Using cache
+ ---> 4ab0356a87fa
+Step 4/7 : RUN CGO_ENABLED=0 GOOS=linux go build -o api ./main.go
+ ---> Using cache
+ ---> 99f6ce55eade
+Step 5/7 : FROM scratch
+ ---> 
+Step 6/7 : COPY --from=builder /app/api /api
+ ---> Using cache
+ ---> f63a54c7630d
+Step 7/7 : CMD ["/api"]
+ ---> Using cache
+ ---> a3eddf025143
+Successfully built a3eddf025143
+Successfully tagged api-multi:latest
+```
+
+Вижу, что ничего не компилировалось - все слои взяты из кэша.
+
+А теперь в исходый файл добавлю комментарий - чтобы хэш файла изменился. И перезапущу сборку.
+
+```bash
+Sending build context to Docker daemon   54.6MB
+Step 1/7 : FROM golang:1.27.1 AS builder
+ ---> e0174e51e812
+Step 2/7 : WORKDIR /app
+ ---> Using cache
+ ---> a84de7bf6d88
+Step 3/7 : COPY ./service/ .
+ ---> 3897bce59faf
+Step 4/7 : RUN CGO_ENABLED=0 GOOS=linux go build -o api ./main.go
+ ---> Running in 8e79ff83b7f9
+ ---> Removed intermediate container 8e79ff83b7f9
+ ---> 5e12322c8da2
+Step 5/7 : FROM scratch
+ ---> 
+Step 6/7 : COPY --from=builder /app/api /api
+ ---> b39f9ea3b145
+Step 7/7 : CMD ["/api"]
+ ---> Running in 63f2fe40d508
+ ---> Removed intermediate container 63f2fe40d508
+ ---> fbe81274fa45
+Successfully built fbe81274fa45
+Successfully tagged api-multi:latest
+```
+
+Видим, что почти все слои компилировались заново, т.к. наш хэш изменился из-за изменений в main.go.
+
+### Теперь проверим фокусы с исчезновением файлов в контейнере. 
+
+Создам копию мультистейдж докерфайла, заменив scratch на alpine  в контейнере, чтобы у меня появилась возможность создать внутри файлы.
+
+Кстати, образ с alpine тяжелеее scratch всего в 2 раза:
+```bash
+IMAGE                     ID             DISK USAGE   CONTENT SIZE   EXTRA     
+api-multi-alpine:latest   aa1914c6dbe5       26.5MB         8.81MB        
+api-multi:latest          fbe81274fa45       13.6MB         4.96MB 
+```
+
+Итак, запускаем контейнер, создаем внутри файл. Удаляю и перезапускаю контейнер и проверяю наличие моего файла:
+
+```bash
+sudo docker run -d --name test-create-file api-multi-alpine
+sudo docker exec -it test-create-file sh
+
+touch /hello.txt
+
+ls /
+api        bin        dev        etc        hello.txt  home       lib        media      mnt        opt        proc       root       run        sbin       srv        sys        tmp        usr        var
+
+exit
+sudo docker rm -f test-create-file
+
+sudo docker run -d --name test-create-file api-multi-alpine
+sudo docker exec -it test-create-file sh
+
+ls /
+api    bin    dev    etc    home   lib    media  mnt    opt    proc   root   run    sbin   srv    sys    tmp    usr    var
+```
+Вижу, что после перезапуска контейнера наш файлик пропал, отлично!
+
+Теперь пробуем примонтировать внешний топ, создать там файл из контейнера и перезапустить контейнер.
+
+```bash
+sudo docker run -d --name test-create-file-volume -v /tmp/mydata:/mydata api-multi-alpine
+sudo docker exec -it test-create-file-volume sh
+
+touch /mydata/hello.txt
+
+ls /mydata
+hello.txt
+
+exit
+sudo docker rm -f test-create-file-volume
+
+sudo docker run -d --name test-create-file-volume -v /tmp/mydata:/mydata api-multi-alpine
+sudo docker exec -it test-create-file-volume sh
+
+ls /mydata
+hello.txt
+```
+
+Ура, мы перезапустили контейнер - а файл на месте! Эксперимент завершен удачно!
+
+## Step 7: Пробуем ещё больше ИЗОЛЯЦИИ!
+
+Так, gVisor у меня не установлен - поэтому первым делом ставлю его.
+
+```bash
+yay -S gvisor-bin
+```
+
+Вообще, что такое gVisor и чем он полезен?
+
+```text
+Он создаёт промежуточный слой изоляции между контейнеризированным приложением и ядром хост-системы. 
+
+Его ключевая идея — реализовать в пользовательском пространстве (userspace) собственное миниатюрное «ядро», которое перехватывает системные вызовы приложения и обрабатывает их самостоятельно, не передавая напрямую ядру хоста. Это значительно сокращает поверхность атаки на ядро хоста.
+```
+
+Т.е. фактически gVisor - что-то среднее между виртуальной машиной и фильтром системных вызовов.
+
+Сразу тут можно упомянуть вопрос: ```что у обычного контейнера остаётся общим с хостом в любом случае и почему это предел контейнерной изоляции? ```
+
+У всех контейнеров с хостом остается общее ядро Linux. Через инструменты, которые мы рассматривали выше, мы можем ограничить доступ процесса к ресурсам ядра, но контейнеры по прежнему не являются виртуалками. 
+
+Поэтому gVisor тут может усилить изоляцию, выступая посредником между контейнером и ядром. Он перехватывает системные вызовы, пропуская через свое ядро, прежде чем они выполнятся на ядре линукса.
+
+Попробую запустить контейнер с gVisor. Для этого, судя по иструкции с оф портала gVisor, нужно внести изменения в daemon.json докера.
+
+```json
+{
+  "runtimes": {
+    "runsc": {
+      "path": "/usr/bin/runsc"
+    }
+  }
+}
+```
+
+И перезапускаем демона командой ```sudo systemctl restart docker```
+
+```bash
+sudo docker run --runtime=runsc -d --name gvisor-test api-multi
+```
+
+Отлично, контейнер запустился на gVisor!
+
+## Step 8: ФИНАЛ, трогаем чуть-чуть мониторинг
