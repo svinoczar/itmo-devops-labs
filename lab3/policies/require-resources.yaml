@@ -1,0 +1,28 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-resources
+spec:
+  validationFailureAction: Enforce
+  rules:
+    - name: check-containers-limits
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [shop]
+      exclude:
+        any:
+          - resources:
+              selector:
+                matchLabels:
+                  cnpg.io/cluster: "?*"
+      validate:
+        message: "Все контейнеры должны иметь resources.limits (cpu и memory)"
+        pattern:
+          spec:
+            containers:
+              - resources:
+                  limits:
+                    memory: "?*"
+                    cpu: "?*"

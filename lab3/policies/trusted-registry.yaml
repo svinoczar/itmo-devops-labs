@@ -1,0 +1,25 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: trusted-registry
+spec:
+  validationFailureAction: Enforce
+  rules:
+    - name: check-registry
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [shop]
+      exclude:
+        any:
+          - resources:
+              selector:
+                matchLabels:
+                  cnpg.io/cluster: "?*"
+      validate:
+        message: "Образы должны быть из docker.io/library/* или shop-*"
+        foreach:
+          - list: "request.object.spec.containers"
+            pattern:
+              image: "docker.io/library/* | shop-*"

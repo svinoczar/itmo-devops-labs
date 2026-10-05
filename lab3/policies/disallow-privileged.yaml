@@ -1,0 +1,39 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-privileged
+spec:
+  validationFailureAction: Enforce
+  rules:
+    - name: check-privileged
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [shop]
+      exclude:
+        any:
+          - resources:
+              selector:
+                matchLabels:
+                  cnpg.io/cluster: "?*"
+      validate:
+        message: "Запрещены privileged контейнеры, hostNetwork, hostPID, hostPath volumes"
+        deny:
+          conditions:
+            any:
+              - key: "{{ request.object.spec.hostNetwork || `false` }}"
+                operator: Equals
+                value: true
+              - key: "{{ request.object.spec.hostPID || `false` }}"
+                operator: Equals
+                value: true
+              - key: "{{ request.object.spec.containers[].securityContext.privileged || `[]` }}"
+                operator: AnyIn
+                value: [true]
+              - key: "{{ request.object.spec.containers[].securityContext.allowPrivilegeEscalation || `[]` }}"
+                operator: AnyIn
+                value: [true]
+              - key: "{{ request.object.spec.volumes[].hostPath || `[]` }}"
+                operator: AnyNotIn
+                value: [null]

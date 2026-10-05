@@ -1,0 +1,26 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-labels
+spec:
+  validationFailureAction: Enforce
+  rules:
+    - name: check-labels
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [shop]
+      exclude:
+        any:
+          - resources:
+              selector:
+                matchLabels:
+                  cnpg.io/cluster: "?*"      
+      validate:
+        message: "Pod должен иметь метки 'app' и 'owner'"
+        pattern:
+          metadata:
+            labels:
+              app: "?*"
+              owner: "?*"

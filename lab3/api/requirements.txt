@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+psycopg[binary]
+python-json-logger
+pydantic
+prometheus-fastapi-instrumentator

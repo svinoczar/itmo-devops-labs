@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: api
+    owner: shop
+spec:
+  replicas: {{ .Values.api.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+        owner: shop
+    spec:
+      containers:
+        - name: api
+          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DB_HOST
+              value: {{ .Values.api.env.DB_HOST | quote }}
+            - name: DB_PORT
+              value: {{ .Values.api.env.DB_PORT | quote }}
+            - name: DB_NAME
+              value: {{ .Values.api.env.DB_NAME | quote }}
+            - name: DB_USER
+              value: {{ .Values.api.env.DB_USER | quote }}
+            - name: DB_PASSWORD
+              value: {{ .Values.api.env.DB_PASSWORD | quote }}
+            - name: HEALTH_FAIL
+              value: {{ .Values.api.env.HEALTH_FAIL | quote }}
+            - name: NEW_VERSION
+              value: {{ .Values.api.env.NEW_VERSION | default "v1" | quote }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: {{ .Values.api.resources.requests.cpu }}
+              memory: {{ .Values.api.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.api.resources.limits.cpu }}
+              memory: {{ .Values.api.resources.limits.memory }}
