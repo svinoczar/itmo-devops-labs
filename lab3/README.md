@@ -776,11 +776,150 @@ api-84677c665b-w6c92   1/1     Running   0          41m
 Эту проблему решает оператор (CRD (Custom Resource Definition) + контроллер). CRD — это новый тип объекта в Kubernetes. Описывается желаемое состояние БД и Контроллер (процесс) приводит реальность к желаемому (создает StatefulSet с репликами Postgres, Service для доступа, Secret с паролем, поднимает поды, обновляет версии-rolling update).<br>
 Для работы выбираем CloudNativePG, так как с ним проще работать. Описываем 1 объект kind: Cluster и он сам делает репликацию, автоматические бэкапы, переключение при сбое.<br>
 <br>
+Устанавливаем CloudNativePG-jgthfnj:
+```
+helm repo add cnpg https://cloudnative-pg.github.io/charts
+helm repo update
 
-### 2.Удаляем под СУБД <br>
+helm install cnpg cnpg/cloudnative-pg \
+  --namespace cnpg-system \
+  --create-namespace
+kubectl get pods -n cnpg-system
+```
+ответ:
+```
+Update Complete. ⎈Happy Helming!⎈
+NAME: cnpg
+LAST DEPLOYED: Mon Oct  5 10:23:08 2026
+NAMESPACE: cnpg-system
+STATUS: deployed
+REVISION: 1
 
+NAME                                   READY   STATUS    RESTARTS   AGE
+cnpg-cloudnative-pg-7b5f5d7b65-9bqzd   1/1     Running   0          60s
+```
+под появился и поднялся. 
 <br>
+Удаляем postgres.yaml и обновляем релиз на всякий:
+```
+helm upgrade shop ./shop-chart -n shop
+Release "shop" has been upgraded. Happy Helming!
+NAME: shop
+LAST DEPLOYED: Mon Oct  5 10:26:13 2026
+NAMESPACE: shop
+STATUS: deployed
+REVISION: 7
+```
+Cоздаем **postgres-cluster.yaml**, куда прописываем неймспейс, метки, ресурсы, секрет с логином поролем.<br>
+В values в переменных окружения переименовываем на DB_HOST: postgres-rw, так как CloudNativePG создаёт сервисы <cluster>-rw, <cluster>-r, <cluster>-ro.<br>
+Обновляем релиз:
+```
+helm upgrade shop ./shop-chart -n shop
+```
+```
+Release "shop" has been upgraded. Happy Helming!
+NAME: shop
+LAST DEPLOYED: Mon Oct  5 10:43:11 2026
+NAMESPACE: shop
+STATUS: deployed
+REVISION: 9
+```
+Возникли сложности, поэтому в политики добавляем:
+```
+      exclude:
+        any:
+          - resources:
+              selector:
+                matchLabels:
+                  cnpg.io/cluster: "?*"
+```
+чтобы объекты с CloudNativePG не проверялись правилами (у них нет меток, образ не из указанного репозитория).
+Cluster создан, апи поднялся:
+```
+NAME                      READY   STATUS    RESTARTS       AGE 
+api-676898b8-lwjdw        1/1     Running   0              5m12s  - новый
+api-676898b8-nxxrp        1/1     Running   20 (10m ago)   83m   - новый с рестартами
+api-676898b8-qfzgp        1/1     Running   0              5m6s  - новый
+postgres-1                1/1     Running   0              6m30s  - создан оператором
+worker-5966f547dd-dgxjl   1/1     Running   0              13h
+worker-5966f547dd-lwrkd   1/1     Running   0              13h
+```
 
+Проверяем на работоспособность:
+```
+1 терминал
+kubectl port-forward -n shop svc/api 8000:80
+
+2 терминал
+curl localhost:8000/health
+curl -X POST localhost:8000/order -H 'Content-Type: application/json' -d '{"item":"cherry"}'
+curl -X POST localhost:8000/order -H 'Content-Type: application/json' -d '{"item":"date"}'
+sleep 6
+curl localhost:8000/orders
+```
+ответ:
+```
+[{"id":2,"item":"date","status":"new","created_at":"2026-10-05T08:55:03.250317+00:00"},{"id":1,"item":"cherry","status":"new","created_at":"2026-10-05T08:55:03.158824+00:00"}]
+```
+работает!
+<br>
+### 2.Удаляем под СУБД <br>
+Удаляем:
+```
+kubectl delete pod -n shop postgres-1
+```
+через 11 секунд под уже готов:
+```
+NAME         READY   STATUS    RESTARTS   AGE
+postgres-1   0/1     Running   0          3s
+postgres-1   0/1     Running   0          4s
+postgres-1   0/1     Running   0          4s
+postgres-1   0/1     Running   0          11s
+postgres-1   1/1     Running   0          11s
+```
+Вызов на локолхосте /orders отдает:
+```
+[{"id":2,"item":"date","status":"new","created_at":"2026-10-05T08:55:03.250317+00:00"},{"id":1,"item":"cherry","status":"new","created_at":"2026-10-05T08:55:03.158824+00:00"}]
+```
+восстановленный контейнер рабочий. 
+<br>
+Смотрим объект:
+```
+kubectl get cluster postgres -n shop -o yaml > /tmp/cluster.yaml
+cat /tmp/cluster.yaml
+```
+```Python
+#spec задали сами
+
+spec:
+  instances: 1
+  storage:
+    size: 1Gi
+  bootstrap:
+    initdb:
+      database: shop
+      owner: shop
+      secret:
+        name: postgres-app-secret
+
+#status прописал оператор
+
+status:
+  phase: Cluster in healthy state
+  instances: 1
+  readyInstances: 1
+  currentPrimary: postgres-1
+  ...
+```
+Что видим:
+1. Мы прописали, что хотим: 1 инстанс Postgres, 1 GiB storage, базу shop, юзера shop, пароль из Secret. <br>
+2. В статус записывается отчет оператора о том, что сделано. <br>
+<br>
 ### 3.Отличие оператора от controller-manager <br>
-- controller-manager встроен в кубер 
-- оператор - расширение кубера, которое является контролером но только для своих CRD
+- controller-manager встроен в кубер  (под в кубере,  является одним из control plane компонентов) <br>
+- оператор - расширение кубера, которое является совокупностью контроллера (под, который следит за CRD и приводит их к желаемому состоянию) и самих CRD-объектов (новый тип объектов сервера апи)
+оператор делает очень большой пласт работы самостоятельно: резервные копии, подъемы при падениях и тп
+<br>
+ю-ху -3)<br>
+
+## Часть 4 — Падение control plane<br> <br>
