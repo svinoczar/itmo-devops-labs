@@ -8,6 +8,8 @@ metadata:
     owner: shop
 spec:
   instances: 1
+  postgresUID: 26 
+  postgresGID: 26        
   storage:
     size: 1Gi
   bootstrap:
