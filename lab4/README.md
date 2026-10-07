@@ -222,8 +222,83 @@ helm template shop ./shop-chart -n shop | grep -A 10 "topologySpreadConstraints"
 ```
 helm upgrade shop ./shop-chart -n shop --set spread.method=podAntiAffinity
 ```
+<br>
 
 ## Часть 2 — Плотное скопление
+Задача посмотреть что поды api/worker/postgres останутся живы при добавлении batch. <br>
+1. добавляем секцию batch в values.yaml, куда прописываем:
+```Python
+    requests:
+      cpu: "100m"
+      memory: "64Mi"
+    limits:
+      cpu: "200m"
+      memory: "128Mi"
+```
+2. Создаем batch-deployment.yaml.
+3. Загружаем образы в миникуб:
+```
+minikube image load shop-batch:0.1.0
+minikube image ls | grep shop-batch
+```
+ответ:
+```
+docker.io/library/shop-batch:0.1.0
+```
+4. Апргрейдим хелм:
+```
+cd ~/itmo-devops-labs/lab4
+helm upgrade shop ./shop-chart -n shop
+sleep 30
+kubectl get pods -n shop
+```
+ответ:
+```
+Release "shop" has been upgraded. Happy Helming!
+NAME: shop
+LAST DEPLOYED: Wed Oct  7 13:22:53 2026
+NAMESPACE: shop
+STATUS: deployed
+REVISION: 3
+NAME                      READY   STATUS    RESTARTS   AGE
+api-5c7ddcd847-8r85h      1/1     Running   0          18s
+api-5c7ddcd847-l5sw5      1/1     Running   0          24s
+api-5c7ddcd847-m4bdg      1/1     Running   0          31s
+batch-86f5c787fd-8hl29    1/1     Running   0          31s
+batch-86f5c787fd-z2t7j    1/1     Running   0          31s
+postgres-1                1/1     Running   0          19h
+worker-576cff47f4-4mg84   1/1     Running   0          19h
+worker-576cff47f4-mtkcv   1/1     Running   0          19h
+```
+Появилось 2 пода batch. <br>
+5. Смотрим логи batch:
+```
+kubectl logs -n shop -l app=batch --tail=15
+```
+ответ:
+```
+{"time": "2026-10-07 10:22:56,509", "level": "INFO", "message": "batch started", "name": "batch", "cpu_load": 50, "mem_mb": 30, "sleep_sec": 5}
+{"time": "2026-10-07 10:23:02,908", "level": "INFO", "message": "batch tick", "name": "batch", "iteration": 1, "cpu_load": 50, "mem_mb": 30}
+{"time": "2026-10-07 10:23:14,798", "level": "INFO", "message": "batch tick", "name": "batch", "iteration": 2, "cpu_load": 50, "mem_mb": 30}
+```
+6. Распределяем по узлам:
+```
+kubectl get pods -n shop -o wide
+```
+ответ:
+```
+NAME                      READY   STATUS    RESTARTS   AGE     IP            NODE           NOMINATED NODE   READINESS GATES
+api-5c7ddcd847-8r85h      1/1     Running   0          2m54s   10.244.1.33   minikube-m02   <none>           <none>
+api-5c7ddcd847-l5sw5      1/1     Running   0          3m      10.244.0.13   minikube       <none>           <none>
+api-5c7ddcd847-m4bdg      1/1     Running   0          3m7s    10.244.1.31   minikube-m02   <none>           <none>
+batch-86f5c787fd-8hl29    1/1     Running   0          3m7s    10.244.0.12   minikube       <none>           <none>
+batch-86f5c787fd-z2t7j    1/1     Running   0          3m7s    10.244.1.32   minikube-m02   <none>           <none>
+postgres-1                1/1     Running   0          19h     10.244.1.29   minikube-m02   <none>           <none>
+worker-576cff47f4-4mg84   1/1     Running   0          19h     10.244.0.8    minikube       <none>           <none>
+worker-576cff47f4-mtkcv   1/1     Running   0          19h     10.244.1.16   minikube-m02   <none>           <none>
+```
+распределение по узлам сработало, все поды живы, ура!
+<br>
 
 ## Часть 3 — Реальные числа вместо угадывания
 
