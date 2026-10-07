@@ -190,7 +190,38 @@ topologySpreadConstraints:
 Плюсы: даже если подов больше, чем нод, все будут на нодах и запустятся. <br>
 Минусы: не гарантированное разделение подов по отдельным нодам, есть варианты, что разделения не будет вообще осущетслвено. <br>
 <br>
-Мы выбираем 2 вариант, просто потому, что по ТЗ у нас подов больше, чем нод, а при 1 варианте один из подов просто не запустится. 
+Мы выбираем 2 вариант, просто потому, что по ТЗ у нас подов больше, чем нод, а при 1 варианте один из подов просто не запустится. <br>
+Добавляем в yaml. <br>
+Добавляем в shop-chart/templates/api-deployment.yaml:
+```
+    spec:
+      {{- if eq .Values.spread.method "topologySpread" }}
+      topologySpreadConstraints:
+        - maxSkew: {{ .Values.spread.topologySpread.maxSkew }}
+          topologyKey: {{ .Values.spread.topologySpread.topologyKey }}
+          whenUnsatisfiable: {{ .Values.spread.topologySpread.whenUnsatisfiable }}
+          labelSelector:
+            matchLabels:
+              app: api
+      {{- else if eq .Values.spread.method "podAntiAffinity" }}
+      affinity:
+        podAntiAffinity:
+          {{ .Values.spread.podAntiAffinity.type }}DuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: api
+              topologyKey: kubernetes.io/hostname
+      {{- end }}
+```
+Проверяем рендер:
+```
+cd ~/itmo-devops-labs/lab4
+helm template shop ./shop-chart -n shop | grep -A 10 "topologySpreadConstraints"
+```
+Команда переключения, но мы пока не используем:
+```
+helm upgrade shop ./shop-chart -n shop --set spread.method=podAntiAffinity
+```
 
 ## Часть 2 — Плотное скопление
 
