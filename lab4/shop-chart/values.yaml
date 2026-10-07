@@ -40,6 +40,24 @@ worker:
     DB_USER: shop
     DB_PASSWORD: shop
     POLL_INTERVAL: "5"
+    
+batch:
+  replicas: 2
+  image:
+    repository: shop-batch
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "64Mi"
+    limits:
+      cpu: "200m"
+      memory: "128Mi"
+  env:
+    CPU_LOAD: "50"
+    MEM_MB: "30"
+    SLEEP_SEC: "5"
 
 serviceMonitor:
   enabled: true

@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: batch
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: batch
+    owner: shop
+spec:
+  replicas: {{ .Values.batch.replicas }}
+  selector:
+    matchLabels:
+      app: batch
+  template:
+    metadata:
+      labels:
+        app: batch
+        owner: shop
+    spec:
+      containers:
+        - name: batch
+          image: "{{ .Values.batch.image.repository }}:{{ .Values.batch.image.tag }}"
+          imagePullPolicy: {{ .Values.batch.image.pullPolicy }}
+          env:
+            - name: CPU_LOAD
+              value: {{ .Values.batch.env.CPU_LOAD | quote }}
+            - name: MEM_MB
+              value: {{ .Values.batch.env.MEM_MB | quote }}
+            - name: SLEEP_SEC
+              value: {{ .Values.batch.env.SLEEP_SEC | quote }}
+          resources:
+            requests:
+              cpu: {{ .Values.batch.resources.requests.cpu }}
+              memory: {{ .Values.batch.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.batch.resources.limits.cpu }}
+              memory: {{ .Values.batch.resources.limits.memory }}
