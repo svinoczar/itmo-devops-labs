@@ -96,20 +96,65 @@ helm install shop ~/itmo-devops-labs/lab3/shop-chart -n shop
 ```
 Все поды запущены, кластер тоже:
 ```
-NAME                      READY   STATUS    RESTARTS        AGE
-api-676898b8-4f4vc        1/1     Running   9 (5m35s ago)   22m
-api-676898b8-8fzgt        1/1     Running   9 (5m57s ago)   22m
-api-676898b8-mvfpz        1/1     Running   9 (6m24s ago)   22m
-postgres-1                1/1     Running   0               3m41s
-worker-576cff47f4-4mg84   1/1     Running   0               22m
-worker-576cff47f4-mtkcv   1/1     Running   0               22m
+NAME                      READY   STATUS    RESTARTS   AGE
+api-676898b8-kfsrh        1/1     Running   0          31s
+api-676898b8-l2l9r        1/1     Running   0          32s
+api-676898b8-lshm9        1/1     Running   0          31s
+postgres-1                1/1     Running   0          55m
+worker-576cff47f4-4mg84   1/1     Running   0          73m
+worker-576cff47f4-mtkcv   1/1     Running   0          73m
+
 NAME       AGE   INSTANCES   READY   STATUS                     PRIMARY
 postgres   14m   1           1       Cluster in healthy state   postgres-1
 ```
 Готово к работе.
 
 ## Часть 0 — Партийный сервис
+Генерируем сервер. Самое главное в блоке try бесконечного цикла.
+<img width="363" height="550" alt="изображение" src="https://github.com/user-attachments/assets/65ea9fd1-21e1-4330-8e9e-861adbcc80e3" />
 
+```
+            iteration += 1
+            
+            for i in range(CPU_LOAD * 500_000):
+                x = i * i
+            
+            held_memory = bytearray(MEM_MB * 1024 * 1024)
+            
+            logger.info("batch tick", extra={
+                "iteration": iteration,
+                "cpu_load": CPU_LOAD,
+                "mem_mb": MEM_MB,
+            })
+
+            time.sleep(SLEEP_SEC)
+```
+Считаем итерации, нагружаем вычислениями, занимаем память, ну как бы все.
+<br>
+Проверяем образ:
+```
+cd ~/itmo-devops-labs/lab4/batch
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+CPU_LOAD=10 MEM_MB=20 SLEEP_SEC=2 python main.py
+```
+Успешно:
+```
+Successfully installed python-json-logger-4.2.0
+{"time": "2026-10-07 12:02:44,268", "level": "INFO", "message": "batch started", "name": "batch", "cpu_load": 10, "mem_mb": 20, "sleep_sec": 2}
+{"time": "2026-10-07 12:02:44,428", "level": "INFO", "message": "batch tick", "name": "batch", "iteration": 1, "cpu_load": 10, "mem_mb": 20}
+{"time": "2026-10-07 12:02:46,595", "level": "INFO", "message": "batch tick", "name": "batch", "iteration": 2, "cpu_load": 10, "mem_mb": 20}
+...
+```
+Собираем:
+```
+docker build -t shop-batch:0.1.0 .
+docker images | grep shop-batch
+```
+```
+shop-batch:0.1.0                                                                                      a72a183249af        178MB         43.3MB  
+```
 ## Часть 1 — Выберите механизм распространения
 
 ## Часть 2 — Плотное скопление
