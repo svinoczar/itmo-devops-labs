@@ -46,3 +46,14 @@ serviceMonitor:
 
 prometheusRule:
   enabled: true
+
+spread:
+  method: topologySpread
+
+  topologySpread:
+    maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+
+  podAntiAffinity:
+    type: preferred
