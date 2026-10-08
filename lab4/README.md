@@ -477,9 +477,23 @@ worker-576cff47f4-mtkcv   1/1     Terminating   0          42h
 worker-584b8b74c4-9hrlc   1/1     Running       0          29s
 worker-584b8b74c4-rk7cb   1/1     Running       0          30s
 ```
-
+ <br>
+ 
 ## Часть 4 — Распространение критической службы
-
+Так как в части 1 мы уже поравили values.yaml и api-deployment.yaml, после чего обновляли чарт, этот принцип разделения уже применен. Усталось это показать наглядно.  <br>
+Смотрим распределение подов api:
+```
+kubectl get pods -n shop -l app=api -o wide
+```
+ответ:
+```
+NAME                   READY   STATUS    RESTARTS   AGE   IP            NODE           NOMINATED NODE   READINESS GATES
+api-77cc67487f-bkhkk   1/1     Running   0          35m   10.244.1.36   minikube-m02   <none>           <none>
+api-77cc67487f-nbnz5   1/1     Running   0          35m   10.244.0.16   minikube       <none>           <none>
+api-77cc67487f-qztkz   1/1     Running   0          34m   10.244.0.17   minikube       <none>           <none>
+```
+Без spread все 3 api могли оказаться на одном узле — при его падении сервис лёг бы целиком. <br>
+<br>
 ## Часть 5 — Установить приоритеты и гарантии
 
 ## Часть 6 — Создайте дефицит, уловите упреждение
