@@ -22,6 +22,7 @@ spec:
         app: api
         owner: shop
     spec:
+      priorityClassName: shop-critical
       {{- if eq .Values.spread.method "topologySpread" }}
       topologySpreadConstraints:
         - maxSkew: {{ .Values.spread.topologySpread.maxSkew }}

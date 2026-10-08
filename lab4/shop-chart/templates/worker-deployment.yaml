@@ -22,6 +22,7 @@ spec:
         app: worker
         owner: shop
     spec:
+      priorityClassName: shop-critical
       containers:
         - name: worker
           image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"

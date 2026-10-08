@@ -8,6 +8,7 @@ metadata:
     owner: shop
 spec:
   instances: 1
+  priorityClassName: shop-critical
   postgresUID: 26 
   postgresGID: 26        
   storage:
@@ -23,8 +24,8 @@ spec:
       cpu: 100m
       memory: 128Mi
     limits:
-      cpu: 500m
-      memory: 512Mi
+      cpu: 100m
+      memory: 128Mi
 ---
 apiVersion: v1
 kind: Secret

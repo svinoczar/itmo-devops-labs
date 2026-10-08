@@ -1,0 +1,17 @@
+{{- if .Values.priorityClass.enabled }}
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: shop-critical
+value: 1000000
+globalDefault: false
+description: "Критичные сервисы shop (api, postgres)"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: shop-batch
+value: 1000
+globalDefault: false
+description: "Batch — низкоприоритетный"
+{{- end }}
