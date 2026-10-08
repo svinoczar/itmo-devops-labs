@@ -493,8 +493,107 @@ api-77cc67487f-nbnz5   1/1     Running   0          35m   10.244.0.16   minikube
 api-77cc67487f-qztkz   1/1     Running   0          34m   10.244.0.17   minikube       <none>           <none>
 ```
 Без spread все 3 api могли оказаться на одном узле — при его падении сервис лёг бы целиком. <br>
-<br>
+ 
+
 ## Часть 5 — Установить приоритеты и гарантии
+Нам нужно проставить подам api, postgres вфсокий приоритет, в случае если кого-то придется выгонять, чтобы они были претендентами в последнюю очередь. <br>
+<br>
+При необходимости кого-то вытеснить, поды с PriorityClass будут рассматриваться последними. <br>
+QoS работает так, что поды Burstable (лимиты выше запросов) выселяются первыми, в отличисе от подов Guaranteed (лимит и запрос равны). <br>
+PodDisruptionBudget у подов говорит куберу, что при зачистках нельзя удалять больше X% этих подов, что приведет к тому, что сервис не упадет целиком. <br>
+<br>
+
+1. Создаем в папке shop-chart/templates **priorityclass.yaml**
+2. В api-deployment.yaml и worker-deployment.yaml добавляем в секцию spec.template.spec:
+```
+priorityClassName: shop-critical
+```
+В batch-deployment.yaml:
+```
+priorityClassName: shop-batch
+```
+В postgres-cluster.yaml в spec после instances: 1:
+```
+priorityClassName: shop-critical
+```
+3. Создаем в папке shop-chart/templates **pdb.yaml** для PodDisruptionBudget с minAvailable: 2 для api и maxUnavailable: 0 для postgres. <br>
+4. Обновляем values.yaml: <br>
+api — Guaranteed QoS (requests = limits):
+```
+api:
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "100Mi"
+    limits:
+      cpu: "100m"
+      memory: "100Mi"
+```
+postgres-cluster.yaml аналогично:
+```
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "100m"
+      memory: "128Mi"
+```
+и перед spread:
+```
+priorityClass:
+  enabled: true
+
+podDisruptionBudget:
+  enabled: true
+```
+Helm отрендерит эти объекты и создаст PriorityClass'ы в кластере <br>
+5. helm upgrade:
+```
+helm upgrade shop ./shop-chart -n shop
+```
+ответ:
+```
+Release "shop" has been upgraded. Happy Helming!
+NAME: shop
+LAST DEPLOYED: Thu Oct  8 13:41:36 2026
+NAMESPACE: shop
+STATUS: deployed
+REVISION: 6
+```
+проверки:
+- PriorityClass
+```
+ubectl get priorityclass | grep shop
+```
+Видим, что создана 2 класса с разными приоритетами:
+```
+shop-batch                1000         false            49s   PreemptLowerPriority
+shop-critical             1000000      false            49s   PreemptLowerPriority
+```
+- PDB
+```
+kubectl get pdb -n shop
+```
+```
+NAME               MIN AVAILABLE   MAX UNAVAILABLE   ALLOWED DISRUPTIONS   AGE
+api                2               N/A               1                     2m51s
+postgres-primary   1               N/A               0                     43h
+```
+- QoS-классы
+```
+kubectl get pods -n shop -o jsonpath='{range .items[*]}{.metadata.name}{"  "}{.status.qosClass}{"\n"}{end}'
+```
+```
+api-7d5d494ff5-6rj7k  Guaranteed
+api-7d5d494ff5-cr6kl  Guaranteed
+api-7d5d494ff5-f26wp  Guaranteed
+batch-6458dbd5d-hmm6r  Burstable
+batch-6458dbd5d-jgs7g  Burstable
+postgres-1  Guaranteed
+worker-858b5f7d96-4th4w  Burstable
+worker-858b5f7d96-qc2ft  Burstable
+```
 
 ## Часть 6 — Создайте дефицит, уловите упреждение
 
