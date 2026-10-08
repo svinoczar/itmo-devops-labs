@@ -417,6 +417,7 @@ History: 336.0 hours #смотрит за 2 недели
 Аналогично видно для подов batch и worker. <br>
 <br>
 5. На основе рекомендаций правим values.yaml:
+  
 ```
 api:
   resources:
