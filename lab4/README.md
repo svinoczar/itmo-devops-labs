@@ -409,8 +409,74 @@ History: 336.0 hours #смотрит за 2 недели
 │        │       │       │      │       │       │       │      │ 10m   │      │       │ 100… │       │
 └────────┴───────┴───────┴──────┴───────┴───────┴───────┴──────┴───────┴──────┴───────┴──────┴───────┘                                        
 ```
+Что видим на примере api:
+- CPU request было 200 - пекомендует 10
+- CPU limit было 500 - рекомендует убрать
+- Memory request было 128 - рекомендует 100
+- Memory limit было 256 - рекомендует 100
+Аналогично видно для подов batch и worker. <br>
+<br>
+5. На основе рекомендаций правим values.yaml:
+```
+api:
+  resources:
+    requests:
+      cpu: "10m"          
+      memory: "100Mi"     
+    limits:
+      cpu: "500m"  
+      memory: "100Mi" 
 
- 
+worker:
+  resources:
+    requests:
+      cpu: "10m"
+      memory: "100Mi"
+    limits:
+      cpu: "300m"
+      memory: "100Mi"
+
+batch:
+  resources:
+    requests:
+      cpu: "125m"
+      memory: "100Mi"
+    limits:
+      cpu: "200m"
+      memory: "100Mi"
+```
+лимит cpu не трогаем, так как в части 8 нам провоцировать throttling.  <br>
+helm upgrade: 
+```
+helm upgrade shop ./shop-chart -n shop
+sleep 30
+kubectl get pods -n shop
+```
+```
+helm upgrade shop ./shop-chart -n shop
+sleep 30
+kubectl get pods -n shop
+Release "shop" has been upgraded. Happy Helming!
+NAME: shop
+LAST DEPLOYED: Thu Oct  8 12:13:05 2026
+NAMESPACE: shop
+STATUS: deployed
+REVISION: 4
+NAME                      READY   STATUS        RESTARTS   AGE
+api-77cc67487f-bkhkk      1/1     Running       0          24s
+api-77cc67487f-nbnz5      1/1     Running       0          30s
+api-77cc67487f-qztkz      1/1     Running       0          18s
+batch-5bd99784f5-hdq8p    1/1     Running       0          30s
+batch-5bd99784f5-v5bkk    1/1     Running       0          29s
+batch-86f5c787fd-8hl29    1/1     Terminating   0          22h
+batch-86f5c787fd-z2t7j    1/1     Terminating   0          22h
+postgres-1                1/1     Running       0          42h
+worker-576cff47f4-4mg84   1/1     Terminating   0          42h
+worker-576cff47f4-mtkcv   1/1     Terminating   0          42h
+worker-584b8b74c4-9hrlc   1/1     Running       0          29s
+worker-584b8b74c4-rk7cb   1/1     Running       0          30s
+```
+
 ## Часть 4 — Распространение критической службы
 
 ## Часть 5 — Установить приоритеты и гарантии
