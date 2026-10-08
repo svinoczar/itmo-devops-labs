@@ -6,11 +6,11 @@ api:
     pullPolicy: IfNotPresent
   resources:
     requests:
-      cpu: "100m"
-      memory: "128Mi"
+      cpu: "10m"          
+      memory: "100Mi"     
     limits:
-      cpu: "500m"
-      memory: "256Mi"
+      cpu: "500m"  
+      memory: "100Mi" 
   env:
     DB_HOST: postgres-rw
     DB_PORT: "5432"
@@ -28,11 +28,11 @@ worker:
     pullPolicy: IfNotPresent
   resources:
     requests:
-      cpu: "100m"
-      memory: "128Mi"
+      cpu: "10m"
+      memory: "100Mi"
     limits:
       cpu: "300m"
-      memory: "256Mi"
+      memory: "100Mi"
   env:
     DB_HOST: postgres-rw
     DB_PORT: "5432"
@@ -49,11 +49,11 @@ batch:
     pullPolicy: IfNotPresent
   resources:
     requests:
-      cpu: "100m"
-      memory: "64Mi"
+      cpu: "125m"
+      memory: "100Mi"
     limits:
       cpu: "200m"
-      memory: "128Mi"
+      memory: "100Mi"
   env:
     CPU_LOAD: "50"
     MEM_MB: "30"
