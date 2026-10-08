@@ -594,8 +594,185 @@ postgres-1  Guaranteed
 worker-858b5f7d96-4th4w  Burstable
 worker-858b5f7d96-qc2ft  Burstable
 ```
+ <br>
+ 
+## Часть 6 — Создайте дефицит, уловите упреждение <br>
+Preemption — это принудительное вытеснение подов с низким приоритетом, когда высокоприоритетному поду не хватает места.<br>
+Смотрим на сколько сейчас используются ресурсы:
+```
+kubectl describe node minikube | grep -A 20 "Allocated resources"
+kubectl describe node minikube-m02 | grep -A 20 "Allocated resources"
+```
+```
+Allocated resources:
+  (Total limits may be over 100 percent, i.e., overcommitted.)
+  Resource           Requests    Limits
+  --------           --------    ------
+  cpu                1085m (7%)  700m (5%)
+  memory             720Mi (2%)  520Mi (1%)
+  ephemeral-storage  0 (0%)      0 (0%)
+  hugepages-1Gi      0 (0%)      0 (0%)
+  hugepages-2Mi      0 (0%)      0 (0%)
+Events:              <none>
+Allocated resources:
+  (Total limits may be over 100 percent, i.e., overcommitted.)
+  Resource           Requests    Limits
+  --------           --------    ------
+  cpu                935m (6%)   1 (7%)
+  memory             898Mi (2%)  1346Mi (4%)
+  ephemeral-storage  0 (0%)      0 (0%)
+  hugepages-1Gi      0 (0%)      0 (0%)
+  hugepages-2Mi      0 (0%)      0 (0%)
+Events:              <none>
+```
+))))))))))  <br>
+ну я на глаз ставила..  <br>
+Щас нахимичим в values.yaml, плюнем, склеим скотчем и все будет.  <br>
+ <br>
+Делаам 30 реплик и поднимаем запросы у batch:
+```
+batch:
+  replicas: 100
+  resources:
+    requests:
+      cpu: "500m"    
+      memory: "500Mi"   
+    limits:
+      cpu: "700m"
+      memory: "600Mi"
+```
+ну и апгрейдим хелм:
+```
+helm upgrade shop ./shop-chart -n shop
+sleep 30
+kubectl get pods -n shop
+```
+```
+Release "shop" has been upgraded. Happy Helming!
+NAME: shop
+LAST DEPLOYED: Thu Oct  8 22:41:02 2026
+NAMESPACE: shop
+STATUS: deployed
+REVISION: 9
+TEST SUITE: None
+     25 Pending
+     53 Running
+```
+Проверяем что api/worker/postgres живы при этом:
+```
+kubectl get pods -n shop | grep -v -E "^batch"
+```
+```
+NAME                      READY   STATUS    RESTARTS   AGE
+api-7d5d494ff5-6rj7k      1/1     Running   0          9h
+api-7d5d494ff5-cr6kl      1/1     Running   0          9h
+api-7d5d494ff5-f26wp      1/1     Running   0          9h
+postgres-1                1/1     Running   0          9h
+worker-858b5f7d96-4th4w   1/1     Running   0          9h
+worker-858b5f7d96-qc2ft   1/1     Running   0          9h
+```
+Смотрим события preemption:
+```
+kubectl get events -n shop --sort-by=.lastTimestamp | grep -i preempt | tail -10
+```
+```
+2m25s       Warning   FailedScheduling                  pod/batch-778c68dbc-f9m69              0/2 nodes are available: 2 Insufficient cpu. preemption: 0/2 nodes are available: 2 Insufficient cpu.
+2m25s       Warning   FailedScheduling                  pod/batch-778c68dbc-dqws8              0/2 nodes are available: 2 Insufficient cpu. preemption: 0/2 nodes are available: 2 Insufficient cpu.
+2m25s       Warning   FailedScheduling                  pod/batch-778c68dbc-mpkqt              0/2 nodes are available: 2 Insufficient cpu. preemption: 0/2 nodes are available: 2 Insufficient cpu.
+2m25s       Warning   FailedScheduling                  pod/batch-778c68dbc-979lz              0/2 nodes are available: 2 Insufficient cpu. preemption: 0/2 nodes are available: 2 Insufficient cpu.
+2m25s       Warning   FailedScheduling                  pod/batch-778c68dbc-8vkns              0/2 nodes are available: 2 Insufficient cpu. preemption: 0/2 nodes are available: 2 Insufficient cpu.
+2m25s       Warning   FailedScheduling                  pod/batch-778c68dbc-mdh8t              0/2 nodes are available: 2 Insufficient cpu. preemption: 0/2 nodes are available: 2 Insufficient cpu.
+2m25s       Warning   FailedScheduling                  pod/batch-778c68dbc-75hkv              0/2 nodes are available: 2 Insufficient cpu. preemption: 0/2 nodes are available: 2 Insufficient cpu.
+2m25s       Warning   FailedScheduling                  pod/batch-778c68dbc-hdxpn              0/2 nodes are available: 2 Insufficient cpu. preemption: 0/2 nodes are available: 2 Insufficient cpu.
+2m25s       Warning   FailedScheduling                  pod/batch-778c68dbc-j47fm              0/2 nodes are available: 2 Insufficient cpu. preemption: 0/2 nodes are available: 2 Insufficient cpu.
+2m25s       Warning   FailedScheduling                  pod/batch-778c68dbc-jjv68              0/2 nodes are available: 2 Insufficient cpu. preemption: 0/2 nodes are available: 2 Insufficient cpu.
+```
+Видим, что не 1 из двух узлов не принял поды из-за перегруза CPU. Scheduler пытался вытеснить кого-нибудь, но не смог.<br>
+Собстна говоря получили че хотели.<br>
+<br>
+Теперь увеличиваем реплики api и апргейдим helm:
+```
+helm upgrade shop ./shop-chart -n shop
+sleep 30
+```
+```
+Release "shop" has been upgraded. Happy Helming!
+NAME: shop
+LAST DEPLOYED: Thu Oct  8 22:47:45 2026
+NAMESPACE: shop
+STATUS: deployed
+REVISION: 10
+```
+Смотрим события preemption:
+```
+kubectl get events -n shop --sort-by=.lastTimestamp | grep -i preempt | tail -10
+```
+И там все грустно, потому что упал kyverno, смотрим события в kyverno:
+```
+kubectl get events -n kyverno | tail -20
+```
+```
+14m  Normal  Preempted  pod/kyverno-admission-controller-769b8f7647-gv6rf
+     Preempted by pod 347a73d4-5bee-4340-84ec-de7dcb281cdf on node minikube-m02
 
-## Часть 6 — Создайте дефицит, уловите упреждение
+14m  Normal  Preempted  pod/kyverno-background-controller-86d8df7447-n4wcf
+     Preempted by pod 347a73d4-5bee-4340-84ec-de7dcb281cdf on node minikube-m02
+
+14m  Normal  Preempted  pod/kyverno-cleanup-controller-86c886ffff-bffbz
+     Preempted by pod 347a73d4-5bee-4340-84ec-de7dcb281cdf on node minikube-m02
+
+14m  Normal  Preempted  pod/kyverno-reports-controller-57c7978d69-4jbfs
+     Preempted by pod 347a73d4-5bee-4340-84ec-de7dcb281cdf on node minikube-m02
+```
+под kyverno был вытеснен другим подом. <br>
+Так то задача поставленная достигнута.. хахах но чуток не туда сработало. <br>
+Поэтому уменьшам реплики batch до 60 и апгрейдим.
+```
+helm upgrade shop ./shop-chart -n shop
+sleep 40
+kubectl get pods -n shop | grep batch | awk '{print $3}' | sort | uniq -c
+Release "shop" has been upgraded. Happy Helming!
+NAME: shop
+LAST DEPLOYED: Thu Oct  8 23:16:14 2026
+NAMESPACE: shop
+STATUS: deployed
+REVISION: 12
+TEST SUITE: None
+      9 Pending
+     51 Running
+```
+но... тут снова преколы:
+```
+maria@ubuntu-dev:~/itmo-devops-labs/lab4$ kubectl get pods -n kyverno
+NAME                                             READY   STATUS             RESTARTS   AGE
+kyverno-admission-controller-769b8f7647-kqhdw    1/1     Running            0          36m
+kyverno-background-controller-86d8df7447-p45kq   0/1     Pending            0          80s
+kyverno-cleanup-controller-86c886ffff-m42x6      0/1     ImagePullBackOff   0          80s
+kyverno-migrate-resources-jchc8                  0/1     ImagePullBackOff   0          9m29s
+kyverno-reports-controller-57c7978d69-b2s25      1/1     Running            0          36m
+maria@ubuntu-dev:~/itmo-devops-labs/lab4$ 
+```
+уже не все ноль, но тоже так себе... Admission-controller живет, так что политики работают (проверено на bad поде), но самое главно, что все api поды живы:
+```
+NAME                   READY   STATUS    RESTARTS   AGE
+api-7d5d494ff5-5lrrl   1/1     Running   0          12m
+api-7d5d494ff5-6rj7k   1/1     Running   0          9h
+api-7d5d494ff5-7jzpt   1/1     Running   0          12m
+api-7d5d494ff5-7lhds   1/1     Running   0          12m
+api-7d5d494ff5-82grh   1/1     Running   0          12m
+api-7d5d494ff5-cr6kl   1/1     Running   0          9h
+api-7d5d494ff5-f26wp   1/1     Running   0          9h
+api-7d5d494ff5-jprsz   1/1     Running   0          12m
+api-7d5d494ff5-wcmqk   1/1     Running   0          12m
+api-7d5d494ff5-zggr4   1/1     Running   0          12m
+```
+Смотрим события preemption:
+```
+6m19s       Warning   FailedScheduling                  pod/batch-778c68dbc-n4l8c      0/2 nodes are available: 2 Insufficient cpu. preemption: found a potential placement for pod on node minikube-m02, preempting 2 victims
+6m18s       Warning   FailedScheduling                  pod/batch-778c68dbc-n4l8c      0/2 nodes are available: 2 Insufficient cpu. preemption: not eligible due to a terminating pod on the nominated node.
+```
+там большой вывод, но нам важны эти 2 события, где scheduler нашёл узел, где вытеснит 2 подов batch. <br>
+Возвращаем все на место.
 
 ## Часть 7 — Давление памяти, приказ о выселении
 
