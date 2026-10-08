@@ -1,0 +1,25 @@
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sAllowedRepos
+metadata:
+  name: only-trusted-image-repositories
+
+spec:
+  enforcementAction: deny
+
+  match:
+    excludedNamespaces:
+      - kube-system
+      - gatekeeper-system
+      - monitoring
+      - local-path-storage
+
+    kinds:
+      - apiGroups:
+          - ""
+        kinds:
+          - Pod
+
+  parameters:
+    repos:
+      - registry.local/shop/
+      - registry.k8s.io/

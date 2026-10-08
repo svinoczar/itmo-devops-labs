@@ -21,7 +21,7 @@ spec:
           - DaemonSet
 
   parameters:
-    message: "workload должty содержать обязательные лейблы владельца"
+    message: "workload должен содержать обязательные лейблы владельца"
     labels:
       - key: app.kubernetes.io/name
       - key: app.kubernetes.io/part-of

@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: untrusted-registry
+
+spec:
+  containers:
+    - name: nginx
+      image: docker.io/library/nginx:1.27.5
+
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          cpu: 100m
+          memory: 64Mi
