@@ -772,10 +772,129 @@ api-7d5d494ff5-zggr4   1/1     Running   0          12m
 6m18s       Warning   FailedScheduling                  pod/batch-778c68dbc-n4l8c      0/2 nodes are available: 2 Insufficient cpu. preemption: not eligible due to a terminating pod on the nominated node.
 ```
 там большой вывод, но нам важны эти 2 события, где scheduler нашёл узел, где вытеснит 2 подов batch. <br>
-Возвращаем все на место.
+Возвращаем все на место.<br>
+<br>
 
-## Часть 7 — Давление памяти, приказ о выселении
+## Часть 7 — Давление памяти, приказ о выселении 
+В прошлой части создавали дефицит по requests, а в этой дефицит по реальному использованию памяти. <br>
+<br>
 
 ## Часть 8 — Докажите SLA под загрузкой
+Даже когда batch создает нагрузку, соединение api - postgres должно работать и отдавать ответы клиенту.<br>
+1. Так как api медленный у нас, сформулируем SLA: «95% POST /order < 10 сек, доля ошибок < 20%, RPS ≥ 3».<br>
+2. Pfgecrftv port-forward:
+```
+kubectl port-forward -n shop svc/api 8001:80
+```
+2. Создаем нагрузка hey:
+```
+hey -z 60s -c 20 -m POST \
+  -H "Content-Type: application/json" \
+  -d '{"item":"sla-nodeport"}' \
+  http://10.99.0.2:30784/order
+```
+```
+Summary:
+  Total:	65.2188 secs
+  Slowest:	17.6003 secs
+  Fastest:	0.0043 secs
+  Average:	4.3368 secs
+  Requests/sec:	5.1519
+  
+  Total data:	8208 bytes
+  Size/request:	28 bytes
+
+Response time histogram:
+  0.004 [1]	|
+  1.764 [43]	|■■■■■■■■■■■■■■■■■
+  3.524 [61]	|■■■■■■■■■■■■■■■■■■■■■■■■
+  5.283 [100]	|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+  7.043 [55]	|■■■■■■■■■■■■■■■■■■■■■■
+  8.802 [17]	|■■■■■■■
+  10.562 [1]	|
+  12.322 [0]	|
+  14.081 [0]	|
+  15.841 [7]	|■■■
+  17.600 [3]	|■
+
+
+Latency distribution:
+  10% in 0.1948 secs
+  25% in 2.9004 secs
+  50% in 4.1991 secs
+  75% in 5.4922 secs
+  90% in 7.0983 secs
+  95% in 8.2959 secs
+  99% in 16.7959 secs
+
+Details (average, fastest, slowest):
+  DNS+dialup:	0.0002 secs, 0.0043 secs, 17.6003 secs
+  DNS-lookup:	0.0000 secs, 0.0000 secs, 0.0000 secs
+  req write:	0.0001 secs, 0.0000 secs, 0.0005 secs
+  resp wait:	4.3363 secs, 0.0037 secs, 17.6000 secs
+  resp read:	0.0002 secs, 0.0000 secs, 0.0010 secs
+
+Status code distribution:
+  [200]	240 responses
+  [500]	48 responses
+``` 
+SLA держится:  <br>
+48 из 288 - 16.7% ошибок <br>
+p95 latency - 8.3 сек <br>
+RPS - 5.15 <br>
+
+
+
+api не тянет такую нагрузку, так как на каждый запрос открывает новое соединение к Postgres. При 20 воркерах — соединения накапливаются, исчерпывают max_connections = 100
+```
+kubectl exec -n shop postgres-1 -- \
+  bash -c 'PGPASSWORD=shop psql -h 127.0.0.1 -U shop -d shop -c "SELECT usename, count(*) FROM pg_stat_activity GROUP BY usename;"'
+
+kubectl exec -n shop postgres-1 -- \
+  bash -c 'PGPASSWORD=shop psql -h 127.0.0.1 -U shop -d shop -c "SHOW max_connections;"'
+```
+```
+Defaulted container "postgres" out of: postgres, bootstrap-controller (init)
+ usename  | count 
+----------+-------
+          |     8
+ postgres |     1
+ shop     |     1
+(3 rows)
+
+Defaulted container "postgres" out of: postgres, bootstrap-controller (init)
+ max_connections 
+-----------------
+ 100
+(1 row)
+```
+3. Смотрим графики в Prometheus: <br>
+RPS: <br>
+```
+sum(rate(http_requests_total{namespace="shop", handler="/order"}[1m]))
+```
+<img width="1361" height="1354" alt="изображение" src="https://github.com/user-attachments/assets/a3fd0683-30b5-457f-867e-8f5991ba244c" /> <br>
+Несколько пиков - несколько попыток нагрузки через hey. Пик ~4.4 RPS - последний. RPS ≥ 3 выполнен.
+<br>
+p95 latency: 
+``` 
+histogram_quantile(0.95, 
+  sum(rate(http_request_duration_seconds_bucket{namespace="shop", handler="/order"}[1m])) by (le)
+)
+```
+<img width="1361" height="1354" alt="изображение" src="https://github.com/user-attachments/assets/351d7cd2-029b-44ba-ab78-0008e430f434" /> <br>
+Линия на 1 сек только в моменты нагрузки. Prometheus занижает реальные значения из-за дефолтных бакетов.
+<br>
+доля 5xx: <br>
+```
+(
+  sum(rate(http_requests_total{namespace="shop", status=~"5.."}[1m]))
+  /
+  sum(rate(http_requests_total{namespace="shop"}[1m]))
+) or vector(0)
+```
+<img width="1361" height="1354" alt="изображение" src="https://github.com/user-attachments/assets/13d5f6a1-8983-4263-8483-6218d836e991" /> <br>
+17% ~ совпадает с hey
+<br>
 
 ## Часть 9 — Мониторинг
