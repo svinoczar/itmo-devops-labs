@@ -917,6 +917,30 @@ histogram_quantile(0.95,
 <br>
 
 ## Часть 9 — Мониторинг <br>
+Так как мы переустанавливали кластер, нам нужно создать karma-values.yaml:
+```
+env:
+  - name: ALERTMANAGER_URI
+    value: http://kube-prom-kube-prometheus-alertmanager.monitoring:9093
+
+service:
+  port: 8080
+  targetPort: http
+```
+апргейдим хелм. Под перезапустился и появились переменные окружения для связи с Alertmanager:
+```
+kubectl describe pod -n monitoring -l app.kubernetes.io/name=karma | grep -A 5 "Environment"
+```
+```
+    Environment:
+      ALERTMANAGER_URI:  http://kube-prom-kube-prometheus-alertmanager.monitoring:9093
+    Mounts:              <none>
+Conditions:
+  Type                        Status
+  PodReadyToStartContainers   True
+```
+**Провоцируем ApiDown.** <br>
+Если Prometheus не может собрать метрики с API, значит сервис недоступен. Клиенты не могут создавать заказы. <br>
 Удаляем поды апи:
 ```
  kubectl scale deployment api -n shop --replicas=0
@@ -925,5 +949,7 @@ Prometheus: http://localhost:9090/alerts <br>
 <img width="1324" height="509" alt="изображение" src="https://github.com/user-attachments/assets/6ed5b1fb-4273-44c4-91e2-0c4fcf2a07e3" /> <br>
 Alertmanager: http://localhost:9093  <br>
 <img width="1248" height="434" alt="изображение" src="https://github.com/user-attachments/assets/1ec287fa-a5c2-4deb-b143-325008d22766" /> <br>
-Karma: 
+Karma: <br>
+<img width="1376" height="188" alt="изображение" src="https://github.com/user-attachments/assets/574c602d-bea9-4a83-bc7d-5e331fc1155d" /> <br>
+
 
