@@ -916,4 +916,14 @@ histogram_quantile(0.95,
 доля ошибок остаётся на нуле, что указывает на отсутствие HTTP 5xx <br>
 <br>
 
-## Часть 9 — Мониторинг
+## Часть 9 — Мониторинг <br>
+Удаляем поды апи:
+```
+ kubectl scale deployment api -n shop --replicas=0
+```  
+Prometheus: http://localhost:9090/alerts <br>
+<img width="1324" height="509" alt="изображение" src="https://github.com/user-attachments/assets/6ed5b1fb-4273-44c4-91e2-0c4fcf2a07e3" /> <br>
+Alertmanager: http://localhost:9093  <br>
+<img width="1248" height="434" alt="изображение" src="https://github.com/user-attachments/assets/1ec287fa-a5c2-4deb-b143-325008d22766" /> <br>
+Karma: 
+
