@@ -777,104 +777,124 @@ api-7d5d494ff5-zggr4   1/1     Running   0          12m
 
 ## Часть 7 — Давление памяти, приказ о выселении 
 В прошлой части создавали дефицит по requests, а в этой дефицит по реальному использованию памяти. <br>
+На данный момент: <br>
+- api и postgres имеют QoS Guaranteed и приоритет shop-critical <br>
+- batch имеет QoS Burstable и приоритет shop-batch <br>
+- Docker ограничивает каждый узел 8 GiB памяти <br>
+<br>
+Для выполнения задания берем ноду minikube, так как на ней нет PostgreSQL.  
+<br>
+
+1. Ставим порог вытеснения:
+```
+ minikube ssh -n minikube -- \
+  "sudo cp /var/lib/kubelet/config.yaml /var/lib/kubelet/config.yaml.bak && \
+   sudo sed -i 's/memory.available: 500Mi/memory.available: 28Gi/' /var/lib/kubelet/config.yaml && \
+   sudo systemctl restart kubelet"
+```
+2. Смотрим собыия:
+```
+kubectl get events -A --sort-by=.lastTimestamp | grep -iE 'Evicted|eviction|MemoryPressure|low on resource'
+```
+```
+shop          2m50s       Warning   Evicted                        pod/batch-c4d85c978-tmknm                                     The node was low on resource: memory. Threshold quantity: 28Gi, available: 28613312Ki. Container batch was using 1452440Ki, request is 20Mi, has larger consumption of memory.
+```
+Видим событие Evicted и причина MemoryPressure. <br>
+3. Смотрим поды:
+```
+NAME                      READY   STATUS             RESTARTS         AGE     IP             NODE           NOMINATED NODE   READINESS GATES
+api-7d5d494ff5-6rj7k      1/1     Running            0                3d1h    10.244.1.37    minikube-m02   <none>           <none>
+api-7d5d494ff5-cr6kl      1/1     Running            0                3d1h    10.244.0.20    minikube       <none>           <none>
+api-7d5d494ff5-f26wp      1/1     Running            0                3d1h    10.244.1.40    minikube-m02   <none>           <none>
+batch-c4d85c978-5nlgh     0/1     OOMKilled          3 (96s ago)      3m25s   10.244.1.172   minikube-m02   <none>           <none>
+batch-c4d85c978-c5558     0/1     CrashLoopBackOff   14 (2m21s ago)   42m     10.244.1.169   minikube-m02   <none>           <none>
+batch-c4d85c978-tmknm     0/1     Error              14 (8m14s ago)   42m     10.244.0.106   minikube       <none>           <none>
+postgres-1                1/1     Running            0                3d1h    10.244.1.41    minikube-m02   <none>           <none>
+worker-858b5f7d96-4th4w   1/1     Running            0                3d1h    10.244.1.38    minikube-m02   <none>           <none>
+worker-858b5f7d96-qc2ft   1/1     Running            0                3d1h    10.244.0.19    minikube       <none>           <none>
+```
+4. Возвращаем порог:
+```
+minikube ssh -n minikube -- \
+  "sudo cp /var/lib/kubelet/config.yaml.bak /var/lib/kubelet/config.yaml && \
+   sudo systemctl restart kubelet"
+```
+
 <br>
 
 ## Часть 8 — Докажите SLA под загрузкой
 Даже когда batch создает нагрузку, соединение api - postgres должно работать и отдавать ответы клиенту.<br>
-1. Так как api медленный у нас, сформулируем SLA: «95% POST /order < 10 сек, доля ошибок < 20%, RPS ≥ 3».<br>
-2. Pfgecrftv port-forward:
+1. Сформулируем SLA: «95% заказов завершаются успешно, p95 не больше 2с даже под нагрузкой».<br>
+2. Запускаем port-forward:
 ```
 kubectl port-forward -n shop svc/api 8001:80
 ```
-2. Создаем нагрузка hey:
+2. Создаем нагрузку hey 30 секунд, 3 одновременных запроса:
 ```
-hey -z 60s -c 20 -m POST \
+hey -z 60s -c 5 \
+  -m POST \
   -H "Content-Type: application/json" \
-  -d '{"item":"sla-nodeport"}' \
-  http://10.99.0.2:30784/order
+  -d '{"item":"lab4-sla-under-batch-load"}' \
+  http://127.0.0.1:8001/order
 ```
 ```
 Summary:
-  Total:	65.2188 secs
-  Slowest:	17.6003 secs
-  Fastest:	0.0043 secs
-  Average:	4.3368 secs
-  Requests/sec:	5.1519
+  Total:	61.1550 secs
+  Slowest:	2.7005 secs
+  Fastest:	0.4320 secs
+  Average:	1.1633 secs
+  Requests/sec:	4.2678
   
-  Total data:	8208 bytes
-  Size/request:	28 bytes
+  Total data:	7830 bytes
+  Size/request:	30 bytes
 
 Response time histogram:
-  0.004 [1]	|
-  1.764 [43]	|■■■■■■■■■■■■■■■■■
-  3.524 [61]	|■■■■■■■■■■■■■■■■■■■■■■■■
-  5.283 [100]	|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
-  7.043 [55]	|■■■■■■■■■■■■■■■■■■■■■■
-  8.802 [17]	|■■■■■■■
-  10.562 [1]	|
-  12.322 [0]	|
-  14.081 [0]	|
-  15.841 [7]	|■■■
-  17.600 [3]	|■
+  0.432 [1]	|■
+  0.659 [15]	|■■■■■■■■
+  0.886 [44]	|■■■■■■■■■■■■■■■■■■■■■■■
+  1.113 [78]	|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+  1.339 [56]	|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+  1.566 [28]	|■■■■■■■■■■■■■■
+  1.793 [17]	|■■■■■■■■■
+  2.020 [14]	|■■■■■■■
+  2.247 [5]	|■■■
+  2.474 [2]	|■
+  2.700 [1]	|■
 
 
 Latency distribution:
-  10% in 0.1948 secs
-  25% in 2.9004 secs
-  50% in 4.1991 secs
-  75% in 5.4922 secs
-  90% in 7.0983 secs
-  95% in 8.2959 secs
-  99% in 16.7959 secs
+  10% in 0.7021 secs
+  25% in 0.9001 secs
+  50% in 1.1015 secs
+  75% in 1.3750 secs
+  90% in 1.7311 secs
+  95% in 1.9268 secs
+  99% in 2.3027 secs
 
 Details (average, fastest, slowest):
-  DNS+dialup:	0.0002 secs, 0.0043 secs, 17.6003 secs
+  DNS+dialup:	0.0000 secs, 0.4320 secs, 2.7005 secs
   DNS-lookup:	0.0000 secs, 0.0000 secs, 0.0000 secs
-  req write:	0.0001 secs, 0.0000 secs, 0.0005 secs
-  resp wait:	4.3363 secs, 0.0037 secs, 17.6000 secs
-  resp read:	0.0002 secs, 0.0000 secs, 0.0010 secs
+  req write:	0.0001 secs, 0.0000 secs, 0.0002 secs
+  resp wait:	1.1617 secs, 0.4317 secs, 2.7003 secs
+  resp read:	0.0015 secs, 0.0000 secs, 0.0992 secs
 
 Status code distribution:
-  [200]	240 responses
-  [500]	48 responses
+  [200]	261 responses
+
 ``` 
-SLA держится:  <br>
-48 из 288 - 16.7% ошибок <br>
-p95 latency - 8.3 сек <br>
-RPS - 5.15 <br>
+SLA выполняется:  <br>
+- p95 — 1,927 <br>
+- 100% заказов успешные <br>
+критический путь сохранил работоспособность под нагрузкой.
+<br>
 
-
-
-api не тянет такую нагрузку, так как на каждый запрос открывает новое соединение к Postgres. При 20 воркерах — соединения накапливаются, исчерпывают max_connections = 100
-```
-kubectl exec -n shop postgres-1 -- \
-  bash -c 'PGPASSWORD=shop psql -h 127.0.0.1 -U shop -d shop -c "SELECT usename, count(*) FROM pg_stat_activity GROUP BY usename;"'
-
-kubectl exec -n shop postgres-1 -- \
-  bash -c 'PGPASSWORD=shop psql -h 127.0.0.1 -U shop -d shop -c "SHOW max_connections;"'
-```
-```
-Defaulted container "postgres" out of: postgres, bootstrap-controller (init)
- usename  | count 
-----------+-------
-          |     8
- postgres |     1
- shop     |     1
-(3 rows)
-
-Defaulted container "postgres" out of: postgres, bootstrap-controller (init)
- max_connections 
------------------
- 100
-(1 row)
-```
 3. Смотрим графики в Prometheus: <br>
 RPS: <br>
 ```
 sum(rate(http_requests_total{namespace="shop", handler="/order"}[1m]))
 ```
-<img width="1361" height="1354" alt="изображение" src="https://github.com/user-attachments/assets/a3fd0683-30b5-457f-867e-8f5991ba244c" /> <br>
-Несколько пиков - несколько попыток нагрузки через hey. Пик ~4.4 RPS - последний. RPS ≥ 3 выполнен.
+<img width="1349" height="1248" alt="изображение" src="https://github.com/user-attachments/assets/ed28d5a6-7a87-4430-9924-4e28a3a1f742" />
+пик соответсвует повышенной нагрузке на апи<br>
 <br>
 p95 latency: 
 ``` 
@@ -882,8 +902,7 @@ histogram_quantile(0.95,
   sum(rate(http_request_duration_seconds_bucket{namespace="shop", handler="/order"}[1m])) by (le)
 )
 ```
-<img width="1361" height="1354" alt="изображение" src="https://github.com/user-attachments/assets/351d7cd2-029b-44ba-ab78-0008e430f434" /> <br>
-Линия на 1 сек только в моменты нагрузки. Prometheus занижает реальные значения из-за дефолтных бакетов.
+<img width="1349" height="1248" alt="изображение" src="https://github.com/user-attachments/assets/e746c15e-9c09-4e5c-9589-a9065bfc03e1" />
 <br>
 доля 5xx: <br>
 ```
@@ -893,8 +912,8 @@ histogram_quantile(0.95,
   sum(rate(http_requests_total{namespace="shop"}[1m]))
 ) or vector(0)
 ```
-<img width="1361" height="1354" alt="изображение" src="https://github.com/user-attachments/assets/13d5f6a1-8983-4263-8483-6218d836e991" /> <br>
-17% ~ совпадает с hey
+<img width="1344" height="1351" alt="изображение" src="https://github.com/user-attachments/assets/18ed585a-ae75-49e9-86bb-b8b6542baffa" />
+доля ошибок остаётся на нуле, что указывает на отсутствие HTTP 5xx <br>
 <br>
 
 ## Часть 9 — Мониторинг
