@@ -949,7 +949,7 @@ Prometheus: http://localhost:9090/alerts <br>
 <img width="1324" height="509" alt="изображение" src="https://github.com/user-attachments/assets/6ed5b1fb-4273-44c4-91e2-0c4fcf2a07e3" /> <br>
 Alertmanager: http://localhost:9093  <br>
 <img width="1248" height="434" alt="изображение" src="https://github.com/user-attachments/assets/1ec287fa-a5c2-4deb-b143-325008d22766" /> <br>
-Karma: <br>
+Karma: http://localhost:8080  <br>
 <img width="1376" height="188" alt="изображение" src="https://github.com/user-attachments/assets/574c602d-bea9-4a83-bc7d-5e331fc1155d" /> <br>
 
 
