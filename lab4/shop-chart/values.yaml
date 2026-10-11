@@ -53,12 +53,12 @@ batch:
       memory: "100Mi"
     limits:
       cpu: "200m"
-      memory: "100Mi"
+      memory: "256Mi"
   env:
-    CPU_LOAD: "50"
+    CPU_LOAD: "10"
     MEM_MB: "30"
     SLEEP_SEC: "5"
-
+    
 serviceMonitor:
   enabled: true
 

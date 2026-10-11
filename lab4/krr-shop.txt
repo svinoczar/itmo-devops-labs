@@ -1,0 +1,37 @@
+                                                                                                      
+Simple Strategy                                                                                       
+                                                                                                      
+CPU request: 95.0% percentile, limit: unset                                                           
+Memory request: max + 15.0%, limit: max + 15.0%                                                       
+History: 24.0 hours                                                                                   
+Step: 1.25 minutes                                                                                    
+                                                                                                      
+All parameters can be customized. For example: `krr simple --cpu_percentile=90                        
+--memory_buffer_percentage=15 --history_duration=24 --timeframe_duration=0.5`                         
+                                                                                                      
+This strategy does not work with objects with HPA defined (Horizontal Pod Autoscaler).                
+If HPA is defined for CPU or Memory, the strategy will return "?" for that resource.                  
+You can override this behaviour by passing the --allow-hpa flag                                       
+                                                                                                      
+Learn more: https://github.com/robusta-dev/krr#algorithm                                              
+                                                                                                      
+┏━━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━┳━━━━━━━┳━━━━━━┳━━━━━━━┳━━━━━━┳━━━━━━━┓
+┃        ┃       ┃       ┃      ┃ Old   ┃       ┃       ┃ CPU  ┃ CPU   ┃ CPU  ┃ Memo… ┃ Mem… ┃ Memo… ┃
+┃ Number ┃ Name… ┃ Name  ┃ Pods ┃ Pods  ┃ Type  ┃ Cont… ┃ Diff ┃ Requ… ┃ Lim… ┃ Diff  ┃ Req… ┃ Limi… ┃
+┡━━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━╇━━━━━━━╇━━━━━━╇━━━━━━━╇━━━━━━╇━━━━━━━┩
+│     1. │ shop  │ api   │ 3    │ 0     │ Depl… │ api   │ -27… │ (-90… │ 100m │ +0m   │ (+0… │ 100Mi │
+│        │       │       │      │       │       │       │ (3   │ 100m  │ ->   │ (3    │ 100… │ ->    │
+│        │       │       │      │       │       │       │ pod… │ ->    │ uns… │ pods) │ ->   │ 100Mi │
+│        │       │       │      │       │       │       │      │ 10m   │      │       │ 100… │       │
+├────────┼───────┼───────┼──────┼───────┼───────┼───────┼──────┼───────┼──────┼───────┼──────┼───────┤
+│     2. │ shop  │ batch │ 2    │ 4     │ Depl… │ batch │ +2m  │ (+1m) │ 200m │ +345… │ (+1… │ 2048… │
+│        │       │       │      │       │       │       │ (2   │ 125m  │ ->   │ (2    │ 20Mi │ ->    │
+│        │       │       │      │       │       │       │ pod… │ ->    │ uns… │ pods) │ ->   │ 1746… │
+│        │       │       │      │       │       │       │      │ 126m  │      │       │ 174… │       │
+├────────┼───────┼───────┼──────┼───────┼───────┼───────┼──────┼───────┼──────┼───────┼──────┼───────┤
+│     3. │ shop  │ work… │ 2    │ 0     │ Depl… │ work… │ +0m  │ (+0m) │ 300m │ +0m   │ (+0… │ 100Mi │
+│        │       │       │      │       │       │       │ (2   │ 10m   │ ->   │ (2    │ 100… │ ->    │
+│        │       │       │      │       │       │       │ pod… │ ->    │ uns… │ pods) │ ->   │ 100Mi │
+│        │       │       │      │       │       │       │      │ 10m   │      │       │ 100… │       │
+└────────┴───────┴───────┴──────┴───────┴───────┴───────┴──────┴───────┴──────┴───────┴──────┴───────┘
+                                            20 points - F                                             
