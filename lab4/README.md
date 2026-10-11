@@ -902,7 +902,7 @@ histogram_quantile(0.95,
   sum(rate(http_request_duration_seconds_bucket{namespace="shop", handler="/order"}[1m])) by (le)
 )
 ```
-<img width="1349" height="1248" alt="изображение" src="https://github.com/user-attachments/assets/e746c15e-9c09-4e5c-9589-a9065bfc03e1" />
+<img width="1344" height="1351" alt="изображение" src="https://github.com/user-attachments/assets/10b3f7a2-f067-4fe4-bfb4-813867819a1a" />
 <br>
 доля 5xx: <br>
 ```
