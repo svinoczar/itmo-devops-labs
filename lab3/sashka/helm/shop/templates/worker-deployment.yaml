@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-worker
+  labels:
+    app.kubernetes.io/name: worker
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    owner: {{ .Values.global.owner }}
+
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: worker
+      app.kubernetes.io/instance: {{ .Release.Name }}
+
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: worker
+        app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        owner: {{ .Values.global.owner }}
+
+    spec:
+      containers:
+        - name: worker
+          image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
+          imagePullPolicy: {{ .Values.worker.image.pullPolicy }}
+
+          ports:
+            - name: http
+              containerPort: {{ .Values.worker.service.port }}
+
+          env:
+            - name: SPRING_SQL_INIT_MODE
+              value: {{ .Values.global.database.initMode | quote }}
+            - name: MANAGEMENT_HEALTH_DB_ENABLED
+              value: {{ .Values.worker.env.dbHealthEnabled | quote }}
+
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.worker.health.path }}
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.worker.health.path }}
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+
+          startupProbe:
+            httpGet:
+              path: {{ .Values.worker.health.path }}
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 36
