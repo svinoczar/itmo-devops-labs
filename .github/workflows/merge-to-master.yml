@@ -1,176 +1,176 @@
-name: Merge To Master Action
+# name: Merge To Master Action
 
-on:
-  pull_request:
-    types: [closed]
-    branches:
-      - master
+# on:
+#   pull_request:
+#     types: [closed]
+#     branches:
+#       - master
 
-jobs:
-  organize:
-    if: >
-      github.event.pull_request.merged == true &&
-      (
-        github.event.pull_request.head.ref == 'sashka' ||
-        github.event.pull_request.head.ref == 'maria-maria' ||
-        github.event.pull_request.head.ref == 'sergo'
-      )
+# jobs:
+#   organize:
+#     if: >
+#       github.event.pull_request.merged == true &&
+#       (
+#         github.event.pull_request.head.ref == 'sashka' ||
+#         github.event.pull_request.head.ref == 'maria-maria' ||
+#         github.event.pull_request.head.ref == 'sergo'
+#       )
 
-    runs-on: ubuntu-latest
+#     runs-on: ubuntu-latest
 
-    permissions:
-      contents: write
+#     permissions:
+#       contents: write
 
-    steps:
-      - name: Checkout master
-        uses: actions/checkout@v4
-        with:
-          ref: master
-          fetch-depth: 0
+#     steps:
+#       - name: Checkout master
+#         uses: actions/checkout@v4
+#         with:
+#           ref: master
+#           fetch-depth: 0
 
-      - name: Get source branch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          path: source
-          fetch-depth: 0
+#       - name: Get source branch
+#         uses: actions/checkout@v4
+#         with:
+#           ref: ${{ github.event.pull_request.head.sha }}
+#           path: source
+#           fetch-depth: 0
 
-      - name: Organize changed labs
-        env:
-          BRANCH: ${{ github.event.pull_request.head.ref }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -e
+#       - name: Organize changed labs
+#         env:
+#           BRANCH: ${{ github.event.pull_request.head.ref }}
+#           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+#           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+#         run: |
+#           set -e
 
-          echo "Branch: $BRANCH"
-          echo "Base: $BASE_SHA"
-          echo "Head: $HEAD_SHA"
+#           echo "Branch: $BRANCH"
+#           echo "Base: $BASE_SHA"
+#           echo "Head: $HEAD_SHA"
 
-          cd source
+#           cd source
 
-          # Получаем только файлы, измененные в PR
-          git diff --name-status -M "$BASE_SHA" "$HEAD_SHA" > /tmp/changes.txt
+#           # Получаем только файлы, измененные в PR
+#           git diff --name-status -M "$BASE_SHA" "$HEAD_SHA" > /tmp/changes.txt
 
-          cd ..
+#           cd ..
 
-          while IFS=$'\t' read -r STATUS FILE_PATH OLD_PATH; do
-            # Пропускаем пустые строки
-            [ -z "$FILE_PATH" ] && continue
+#           while IFS=$'\t' read -r STATUS FILE_PATH OLD_PATH; do
+#             # Пропускаем пустые строки
+#             [ -z "$FILE_PATH" ] && continue
 
-            # Интересуют только lab1, lab2, lab3 и т.д.
-            if [[ "$FILE_PATH" != lab*/* ]]; then
-              continue
-            fi
+#             # Интересуют только lab1, lab2, lab3 и т.д.
+#             if [[ "$FILE_PATH" != lab*/* ]]; then
+#               continue
+#             fi
 
-            LAB="${FILE_PATH%%/*}"
+#             LAB="${FILE_PATH%%/*}"
 
-            echo ""
-            echo "Processing: $STATUS $FILE_PATH"
+#             echo ""
+#             echo "Processing: $STATUS $FILE_PATH"
 
-            case "$STATUS" in
+#             case "$STATUS" in
 
-              A|M)
-                # Добавленный или измененный файл
+#               A|M)
+#                 # Добавленный или измененный файл
 
-                # Если файл уже находится в labN/<branch>/,
-                # значит он уже организован — оставляем его на месте.
-                if [[ "$FILE_PATH" == "$LAB/$BRANCH/"* ]]; then
-                  TARGET="$FILE_PATH"
+#                 # Если файл уже находится в labN/<branch>/,
+#                 # значит он уже организован — оставляем его на месте.
+#                 if [[ "$FILE_PATH" == "$LAB/$BRANCH/"* ]]; then
+#                   TARGET="$FILE_PATH"
 
-                  echo "  already organized: $TARGET"
-                else
-                  RELATIVE_PATH="${FILE_PATH#*/}"
-                  TARGET="$LAB/$BRANCH/$RELATIVE_PATH"
+#                   echo "  already organized: $TARGET"
+#                 else
+#                   RELATIVE_PATH="${FILE_PATH#*/}"
+#                   TARGET="$LAB/$BRANCH/$RELATIVE_PATH"
 
-                  mkdir -p "$(dirname "$TARGET")"
+#                   mkdir -p "$(dirname "$TARGET")"
 
-                  cp "source/$FILE_PATH" "$TARGET"
+#                   cp "source/$FILE_PATH" "$TARGET"
 
-                  # Удаляем файл, который Git добавил в корень labN
-                  rm -f "$FILE_PATH"
+#                   # Удаляем файл, который Git добавил в корень labN
+#                   rm -f "$FILE_PATH"
 
-                  echo "  source/$FILE_PATH"
-                  echo "       -> $TARGET"
-                fi
-                ;;
+#                   echo "  source/$FILE_PATH"
+#                   echo "       -> $TARGET"
+#                 fi
+#                 ;;
 
-              D)
-                # Файл удален в исходной ветке
+#               D)
+#                 # Файл удален в исходной ветке
 
-                if [[ "$FILE_PATH" == "$LAB/$BRANCH/"* ]]; then
-                  TARGET="$FILE_PATH"
-                else
-                  RELATIVE_PATH="${FILE_PATH#*/}"
-                  TARGET="$LAB/$BRANCH/$RELATIVE_PATH"
-                fi
+#                 if [[ "$FILE_PATH" == "$LAB/$BRANCH/"* ]]; then
+#                   TARGET="$FILE_PATH"
+#                 else
+#                   RELATIVE_PATH="${FILE_PATH#*/}"
+#                   TARGET="$LAB/$BRANCH/$RELATIVE_PATH"
+#                 fi
 
-                rm -f "$TARGET"
+#                 rm -f "$TARGET"
 
-                # Удаляем возможный файл из корня labN
-                rm -f "$FILE_PATH"
+#                 # Удаляем возможный файл из корня labN
+#                 rm -f "$FILE_PATH"
 
-                echo "  deleted $TARGET"
-                ;;
+#                 echo "  deleted $TARGET"
+#                 ;;
 
-              R*)
-                # Rename: удаляем старый файл
+#               R*)
+#                 # Rename: удаляем старый файл
 
-                if [[ "$OLD_PATH" == "$LAB/$BRANCH/"* ]]; then
-                  OLD_TARGET="$OLD_PATH"
-                else
-                  OLD_RELATIVE="${OLD_PATH#*/}"
-                  OLD_TARGET="$LAB/$BRANCH/$OLD_RELATIVE"
-                fi
+#                 if [[ "$OLD_PATH" == "$LAB/$BRANCH/"* ]]; then
+#                   OLD_TARGET="$OLD_PATH"
+#                 else
+#                   OLD_RELATIVE="${OLD_PATH#*/}"
+#                   OLD_TARGET="$LAB/$BRANCH/$OLD_RELATIVE"
+#                 fi
 
-                rm -f "$OLD_TARGET"
+#                 rm -f "$OLD_TARGET"
 
-                # Добавляем новый файл
-                if [[ "$FILE_PATH" == "$LAB/$BRANCH/"* ]]; then
-                  TARGET="$FILE_PATH"
-                else
-                  RELATIVE_PATH="${FILE_PATH#*/}"
-                  TARGET="$LAB/$BRANCH/$RELATIVE_PATH"
+#                 # Добавляем новый файл
+#                 if [[ "$FILE_PATH" == "$LAB/$BRANCH/"* ]]; then
+#                   TARGET="$FILE_PATH"
+#                 else
+#                   RELATIVE_PATH="${FILE_PATH#*/}"
+#                   TARGET="$LAB/$BRANCH/$RELATIVE_PATH"
 
-                  mkdir -p "$(dirname "$TARGET")"
+#                   mkdir -p "$(dirname "$TARGET")"
 
-                  cp "source/$FILE_PATH" "$TARGET"
+#                   cp "source/$FILE_PATH" "$TARGET"
 
-                  # Удаляем файл из корня labN
-                  rm -f "$FILE_PATH"
-                fi
+#                   # Удаляем файл из корня labN
+#                   rm -f "$FILE_PATH"
+#                 fi
 
-                # На случай rename внутри корня labN
-                if [[ "$OLD_PATH" != "$OLD_TARGET" ]]; then
-                  rm -f "$OLD_PATH"
-                fi
+#                 # На случай rename внутри корня labN
+#                 if [[ "$OLD_PATH" != "$OLD_TARGET" ]]; then
+#                   rm -f "$OLD_PATH"
+#                 fi
 
-                echo "  renamed:"
-                echo "    $OLD_TARGET"
-                echo "    -> $TARGET"
-                ;;
+#                 echo "  renamed:"
+#                 echo "    $OLD_TARGET"
+#                 echo "    -> $TARGET"
+#                 ;;
 
-            esac
+#             esac
 
-          done < /tmp/changes.txt
+#           done < /tmp/changes.txt
 
-          rm -rf source
+#           rm -rf source
 
-      - name: Commit changes
-        env:
-          BRANCH: ${{ github.event.pull_request.head.ref }}
-        run: |
-          set -e
+#       - name: Commit changes
+#         env:
+#           BRANCH: ${{ github.event.pull_request.head.ref }}
+#         run: |
+#           set -e
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+#           git config user.name "github-actions[bot]"
+#           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add -A
+#           git add -A
 
-          if git diff --cached --quiet; then
-            echo "No changes to commit"
-            exit 0
-          fi
+#           if git diff --cached --quiet; then
+#             echo "No changes to commit"
+#             exit 0
+#           fi
 
-          git commit -m "chore: organize labs from $BRANCH"
-          git push origin master
+#           git commit -m "chore: organize labs from $BRANCH"
+#           git push origin master
