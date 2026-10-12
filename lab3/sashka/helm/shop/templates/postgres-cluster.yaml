@@ -1,0 +1,23 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ .Release.Name }}-postgres
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    owner: {{ .Values.global.owner }}
+
+spec:
+  instances: {{ .Values.postgres.instances }}
+
+  bootstrap:
+    initdb:
+      database: {{ .Values.postgres.bootstrap.database }}
+      owner: {{ .Values.postgres.bootstrap.owner }}
+
+  storage:
+    size: {{ .Values.postgres.storage.size }}
+
+  resources:
+    {{- toYaml .Values.postgres.resources | nindent 4 }}

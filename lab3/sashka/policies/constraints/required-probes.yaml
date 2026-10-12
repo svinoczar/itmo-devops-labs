@@ -1,0 +1,36 @@
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredProbes
+metadata:
+  name: containers-must-have-probes
+
+spec:
+  enforcementAction: deny
+
+  match:
+    excludedNamespaces:
+      - kube-system
+      - gatekeeper-system
+      - monitoring
+      - local-path-storage
+      - cnpg-system
+
+    kinds:
+      - apiGroups:
+          - ""
+        kinds:
+          - Pod
+
+    labelSelector:
+      matchExpressions:
+        - key: batch.kubernetes.io/job-name
+          operator: DoesNotExist
+  
+  parameters:
+    probes:
+      - readinessProbe
+      - livenessProbe
+
+    probeTypes:
+      - httpGet
+      - tcpSocket
+      - exec

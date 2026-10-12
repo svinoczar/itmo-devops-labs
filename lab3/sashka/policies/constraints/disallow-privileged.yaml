@@ -1,0 +1,24 @@
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sPSPPrivilegedContainer
+metadata:
+  name: privileged-containers-are-forbidden
+
+spec:
+  enforcementAction: deny
+
+  match:
+    excludedNamespaces:
+      - kube-system
+      - gatekeeper-system
+      - monitoring
+      - local-path-storage
+      - cnpg-system
+
+    kinds:
+      - apiGroups:
+          - ""
+        kinds:
+          - Pod
+
+  parameters:
+    exemptImages: []

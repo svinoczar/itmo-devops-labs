@@ -1,0 +1,30 @@
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredResources
+metadata:
+  name: containers-must-have-resources
+
+spec:
+  enforcementAction: deny
+
+  match:
+    excludedNamespaces:
+      - kube-system
+      - gatekeeper-system
+      - monitoring
+      - local-path-storage
+      - cnpg-system
+
+    kinds:
+      - apiGroups:
+          - ""
+        kinds:
+          - Pod
+
+  parameters:
+    requests:
+      - cpu
+      - memory
+
+    limits:
+      - cpu
+      - memory
