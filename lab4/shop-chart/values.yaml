@@ -1,0 +1,85 @@
+api:
+  replicas: 3
+  image:
+    repository: shop-api
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "100Mi"
+    limits:
+      cpu: "100m"
+      memory: "100Mi"
+  env:
+    DB_HOST: postgres-rw
+    DB_PORT: "5432"
+    DB_NAME: shop
+    DB_USER: shop
+    DB_PASSWORD: shop
+    HEALTH_FAIL: "false"
+    NEW_VERSION: "v1"     
+
+worker:
+  replicas: 2
+  image:
+    repository: shop-worker
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: "10m"
+      memory: "100Mi"
+    limits:
+      cpu: "300m"
+      memory: "100Mi"
+  env:
+    DB_HOST: postgres-rw
+    DB_PORT: "5432"
+    DB_NAME: shop
+    DB_USER: shop
+    DB_PASSWORD: shop
+    POLL_INTERVAL: "5"
+    
+batch:
+  replicas: 2
+  image:
+    repository: shop-batch
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: "125m"
+      memory: "100Mi"
+    limits:
+      cpu: "200m"
+      memory: "256Mi"
+  env:
+    CPU_LOAD: "10"
+    MEM_MB: "30"
+    SLEEP_SEC: "5"
+    
+serviceMonitor:
+  enabled: true
+
+prometheusRule:
+  enabled: true
+
+priorityClass:
+  enabled: true
+
+podDisruptionBudget:
+  enabled: true
+
+spread:
+  method: topologySpread
+
+  topologySpread:
+    maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+
+  podAntiAffinity:
+    type: preferred
+
+  

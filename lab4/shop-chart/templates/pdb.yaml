@@ -1,0 +1,23 @@
+{{- if .Values.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api
+  namespace: {{ .Release.Namespace }}
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: api
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: postgres
+  namespace: {{ .Release.Namespace }}
+spec:
+  maxUnavailable: 0
+  selector:
+    matchLabels:
+      cnpg.io/cluster: postgres
+{{- end }}
