@@ -12,6 +12,7 @@ spec:
       - gatekeeper-system
       - monitoring
       - local-path-storage
+      - cnpg-system
 
     kinds:
       - apiGroups:
@@ -19,6 +20,11 @@ spec:
         kinds:
           - Pod
 
+    labelSelector:
+      matchExpressions:
+        - key: batch.kubernetes.io/job-name
+          operator: DoesNotExist
+  
   parameters:
     probes:
       - readinessProbe

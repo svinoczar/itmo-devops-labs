@@ -12,6 +12,7 @@ spec:
       - gatekeeper-system
       - monitoring
       - local-path-storage
+      - cnpg-system
 
     kinds:
       - apiGroups:

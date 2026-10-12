@@ -12,6 +12,7 @@ spec:
       - gatekeeper-system
       - monitoring
       - local-path-storage
+      - cnpg-system
 
     kinds:
       - apiGroups:
@@ -23,3 +24,4 @@ spec:
     repos:
       - registry.local/shop/
       - registry.k8s.io/
+      - ghcr.io/cloudnative-pg/

@@ -43,8 +43,39 @@ spec:
           env:
             - name: HEALTH_FAIL
               value: {{ .Values.api.env.HEALTH_FAIL | quote }}
+              
             - name: SPRING_SQL_INIT_MODE
               value: {{ .Values.global.database.initMode | quote }}
+            
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.database.secretName }}
+                  key: host
+
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.database.secretName }}
+                  key: port
+
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.database.secretName }}
+                  key: dbname
+
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.database.secretName }}
+                  key: username
+
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.database.secretName }}
+                  key: password
 
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}

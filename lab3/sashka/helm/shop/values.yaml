@@ -2,7 +2,8 @@ global:
   partOf: shop
   owner: sashka
   database:
-    initMode: never
+    secretName: shop-postgres-app
+    initMode: always
 
 api:
   replicaCount: 4
@@ -42,4 +43,29 @@ worker:
   health:
     path: /health
   env:
-    dbHealthEnabled: "false"
+    dbHealthEnabled: "true"
+
+
+postgres:
+  instances: 1
+
+  storage:
+    size: 1Gi
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  bootstrap:
+    database: shop
+    owner: shop
+
+monitoring:
+  enabled: true
+  release: monitoring
+  path: /metrics
+  interval: 15s
