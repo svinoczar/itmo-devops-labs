@@ -1,0 +1,90 @@
+defaultRules:
+  create: false
+
+grafana:
+  # Две параллельно стартующие Grafana слишком тяжелы для тесного kind-кластера.
+  deploymentStrategy:
+    type: Recreate
+    rollingUpdate: null
+  readinessProbe:
+    initialDelaySeconds: 60
+    timeoutSeconds: 15
+    failureThreshold: 12
+  livenessProbe:
+    # Liveness проверяет сам TCP listener; readiness ниже проверяет HTTP API.
+    httpGet: null
+    tcpSocket:
+      port: grafana
+    initialDelaySeconds: 600
+    timeoutSeconds: 15
+    failureThreshold: 12
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 384Mi
+  sidecar:
+    dashboards:
+      enabled: true
+      searchNamespace: ALL
+
+prometheus:
+  prometheusSpec:
+    retention: 2d
+    serviceMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 768Mi
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 20m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+prometheusOperator:
+  admissionWebhooks:
+    enabled: false
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 384Mi
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 60
+    timeoutSeconds: 5
+    periodSeconds: 10
+    failureThreshold: 6
+  readinessProbe:
+    enabled: true
+    initialDelaySeconds: 10
+    timeoutSeconds: 5
+    periodSeconds: 10
+    failureThreshold: 6
+
+nodeExporter:
+  enabled: false
+
+kubeStateMetrics:
+  enabled: false
+
+kubeEtcd:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
