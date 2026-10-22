@@ -1,0 +1,49 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: continuity-client
+  labels:
+    app.kubernetes.io/name: continuity-client
+    app.kubernetes.io/part-of: shop
+    owner: sashka
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: continuity-client
+        network-role: network-client
+        app.kubernetes.io/part-of: shop
+        owner: sashka
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: client
+          image: registry.local/shop/worker:1.0.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              ok=0
+              failed=0
+              i=0
+              while [ "$i" -lt 600 ]; do
+                if curl --fail --silent --max-time 2 \
+                  http://shop-api.shop.svc.cluster.local:8080/health >/dev/null; then
+                  ok=$((ok + 1))
+                else
+                  failed=$((failed + 1))
+                fi
+                printf '%s,%s,%s\n' "$(date +%s)" "$ok" "$failed"
+                i=$((i + 1))
+                sleep 0.25
+              done
+              test "$failed" -eq 0
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
