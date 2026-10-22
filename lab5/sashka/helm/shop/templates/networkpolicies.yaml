@@ -1,0 +1,238 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-default-deny
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+
+---
+
+# DNS разрешён отдельно: бизнес-маршруты по Service DNS без него бесполезны.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-allow-dns
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    {{- if ne .Values.networkPolicy.fault "dns" }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: {{ .Values.networkPolicy.dns.port }}
+        - protocol: TCP
+          port: {{ .Values.networkPolicy.dns.port }}
+    {{- else }}
+    []
+    {{- end }}
+
+---
+
+# Внешний NodePort и тестовый клиент могут обращаться только к API:8080.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-allow-api-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: api
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - {{ .Values.networkPolicy.podSubnet }}
+              - {{ .Values.networkPolicy.serviceSubnet }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.api.service.port }}
+    - from:
+        - podSelector:
+            matchLabels:
+              network-role: {{ if eq .Values.networkPolicy.fault "apiSelector" }}broken-client{{ else }}{{ .Values.networkPolicy.client.roleLabel }}{{ end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.api.service.port }}
+
+---
+
+# API и worker могут инициировать соединения только с PostgreSQL.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-allow-database-clients
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [api, worker]
+      - key: app.kubernetes.io/instance
+        operator: In
+        values: [{{ .Release.Name }}]
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: {{ if eq .Values.networkPolicy.fault "postgresSelector" }}broken-postgres{{ else }}{{ .Release.Name }}-postgres{{ end }}
+      ports:
+        - protocol: TCP
+          port: {{ if eq .Values.networkPolicy.fault "postgresPort" }}15432{{ else }}{{ .Values.networkPolicy.postgres.port }}{{ end }}
+
+---
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-allow-client-to-api
+spec:
+  podSelector:
+    matchLabels:
+      network-role: {{ if eq .Values.networkPolicy.fault "apiSelector" }}broken-client{{ else }}{{ .Values.networkPolicy.client.roleLabel }}{{ end }}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: api
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.api.service.port }}
+
+---
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-allow-postgres-ingress
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: {{ .Release.Name }}-postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [api, worker]
+              - key: app.kubernetes.io/instance
+                operator: In
+                values: [{{ .Release.Name }}]
+      ports:
+        - protocol: TCP
+          port: {{ if eq .Values.networkPolicy.fault "postgresPort" }}15432{{ else }}{{ .Values.networkPolicy.postgres.port }}{{ end }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cnpg-system
+      ports:
+        - protocol: TCP
+          port: {{ .Values.networkPolicy.postgres.managerPort }}
+    # Kubelet выполняет readiness/liveness probes с адреса kind-ноды.
+    - from:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.kubernetesApi.nodeCidr }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.networkPolicy.postgres.managerPort }}
+
+---
+
+# Instance manager CNPG читает Kubernetes API для управления состоянием БД.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-allow-postgres-kubernetes-api
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: {{ .Release.Name }}-postgres
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.kubernetesApi.cidr }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.networkPolicy.kubernetesApi.port }}
+    # Cilium применяет egress policy после Service DNAT, поэтому виден адрес ноды.
+    - to:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.kubernetesApi.nodeCidr }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.networkPolicy.kubernetesApi.nodePort }}
+
+---
+
+# kube-apiserver имеет специальную Cilium identity, поэтому здесь точнее
+# использовать toEntities, чем угадывать адрес до/после Service DNAT.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-allow-postgres-kube-apiserver
+spec:
+  endpointSelector:
+    matchLabels:
+      cnpg.io/cluster: {{ .Release.Name }}-postgres
+  egress:
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "{{ .Values.networkPolicy.kubernetesApi.port }}"
+              protocol: TCP
+            - port: "{{ .Values.networkPolicy.kubernetesApi.nodePort }}"
+              protocol: TCP
+
+{{- if .Values.monitoring.enabled }}
+---
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-allow-prometheus
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [api, worker]
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: {{ .Values.api.service.port }}
+        - protocol: TCP
+          port: {{ .Values.worker.service.port }}
+{{- end }}
+{{- end }}
