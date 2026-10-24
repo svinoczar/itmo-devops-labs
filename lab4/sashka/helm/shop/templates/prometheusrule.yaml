@@ -1,0 +1,70 @@
+{{- if .Values.monitoring.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: shop-alerts
+  labels:
+    release: {{ .Values.monitoring.release }}
+spec:
+  groups:
+    - name: shop.rules
+      rules:
+        - alert: ShopApiUnavailable
+          expr: |
+            (sum(up{namespace="{{ .Release.Namespace }}", job="shop-api"}) < 1)
+            or
+            absent(up{namespace="{{ .Release.Namespace }}", job="shop-api"})
+          for: 1m
+          labels:
+            severity: critical
+            service: shop-api
+          annotations:
+            summary: Shop API недоступен
+            description: Prometheus не видит ни одной доступной реплики shop-api.
+
+        - alert: ShopApiHighErrorRate
+          expr: |
+            100 *
+            (
+              sum(rate(shop_api_http_requests_total{
+                namespace="{{ .Release.Namespace }}",
+                job="shop-api",
+                status=~"5.."
+              }[2m])) or vector(0)
+            )
+            /
+            clamp_min(
+              sum(rate(shop_api_http_requests_total{
+                namespace="{{ .Release.Namespace }}",
+                job="shop-api"
+              }[2m])),
+              0.001
+            ) > 20
+          for: 1m
+          labels:
+            severity: warning
+            service: shop-api
+          annotations:
+            summary: Высокая доля ошибок Shop API
+            description: Более 20% HTTP-запросов завершаются кодом 5xx.
+
+        - alert: ShopApiHighP95Latency
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum by (le) (
+                rate(shop_api_http_request_duration_seconds_bucket{
+                  namespace="{{ .Release.Namespace }}",
+                  job="shop-api",
+                  route!="/health"
+                }[2m])
+              )
+            ) > 1
+          for: 1m
+          labels:
+            severity: warning
+            service: shop-api
+          annotations:
+            summary: Высокая задержка Shop API
+            description: p95 времени ответа Shop API превышает одну секунду.
+{{- end }}

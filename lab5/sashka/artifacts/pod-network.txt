@@ -1,0 +1,11 @@
+API Pod: shop-api-9bd88678d-8wl7w
+Pod IP:  10.245.2.16
+Node:    lab5-worker
+eth0 from inside the Pod:
+ifindex=10
+iflink=11
+address=ce:13:4e:de:37:49
+mtu=1500
+Peer interface on lab5-worker:
+11: lxc697ec234fac7@if10: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000\    link/ether 12:a4:3c:d8:da:43 brd ff:ff:ff:ff:ff:ff link-netns cni-48b723d7-adb1-e377-5872-27d672584c45
+Cross-node connectivity check skipped (zero-trust policies are already enabled).

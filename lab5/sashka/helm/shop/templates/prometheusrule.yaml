@@ -1,0 +1,52 @@
+{{- if .Values.monitoring.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ .Release.Name }}-network-alerts
+  labels:
+    release: {{ .Values.monitoring.release }}
+spec:
+  groups:
+    - name: shop.network.rules
+      rules:
+        - alert: ShopNetworkPolicyDrops
+          expr: |
+            sum(rate(hubble_drop_total{
+              reason="POLICY_DENIED",
+              source_namespace="{{ .Release.Namespace }}"
+            }[2m])) > 0
+          for: 30s
+          labels:
+            severity: warning
+            service: shop-network
+          annotations:
+            summary: Cilium блокирует трафик shop
+            description: Из namespace shop идёт трафик, запрещённый NetworkPolicy.
+
+        - alert: ShopDnsErrors
+          expr: |
+            sum(rate(coredns_dns_responses_total{
+              rcode="SERVFAIL"
+            }[5m])) > 0
+          for: 1m
+          labels:
+            severity: warning
+            service: shop-dns
+          annotations:
+            summary: CoreDNS возвращает SERVFAIL
+            description: Ошибки CoreDNS могут нарушить обращения shop по Service DNS.
+
+        - alert: ShopTcpResets
+          expr: |
+            sum(rate(hubble_tcp_flags_total{
+              source_namespace="{{ .Release.Namespace }}",
+              flag="RST"
+            }[2m])) > 0.5
+          for: 1m
+          labels:
+            severity: warning
+            service: shop-network
+          annotations:
+            summary: Много сброшенных TCP-соединений shop
+            description: Частые TCP RST могут означать недоступный backend или аварийные разрывы.
+{{- end }}

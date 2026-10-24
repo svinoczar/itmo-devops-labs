@@ -1,0 +1,40 @@
+{{- if .Values.monitoring.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-network-dashboard
+  labels:
+    grafana_dashboard: "1"
+data:
+  shop-network.json: |-
+    {
+      "title": "Shop network",
+      "uid": "shop-network",
+      "schemaVersion": 41,
+      "refresh": "10s",
+      "time": {"from": "now-30m", "to": "now"},
+      "panels": [
+        {
+          "type": "timeseries",
+          "title": "TCP connections (SYN/s)",
+          "id": 1,
+          "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0},
+          "targets": [{"refId": "A", "expr": "sum(rate(hubble_tcp_flags_total{source_namespace=\"{{ .Release.Namespace }}\",flag=\"SYN\"}[2m]))"}]
+        },
+        {
+          "type": "timeseries",
+          "title": "Policy denied traffic",
+          "id": 2,
+          "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0},
+          "targets": [{"refId": "A", "expr": "sum(rate(hubble_drop_total{source_namespace=\"{{ .Release.Namespace }}\",reason=\"POLICY_DENIED\"}[2m]))"}]
+        },
+        {
+          "type": "timeseries",
+          "title": "DNS responses by rcode",
+          "id": 3,
+          "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0},
+          "targets": [{"refId": "A", "expr": "sum by (rcode) (rate(coredns_dns_responses_total[2m]))", "legendFormat": "{{ `{{rcode}}` }}"}]
+        }
+      ]
+    }
+{{- end }}

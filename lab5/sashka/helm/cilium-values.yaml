@@ -1,0 +1,39 @@
+ipam:
+  mode: kubernetes
+
+image:
+  pullPolicy: IfNotPresent
+
+hubble:
+  relay:
+    enabled: true
+  ui:
+    enabled: true
+  metrics:
+    enableOpenMetrics: true
+    enabled:
+      - dns:query;ignoreAAAA;labelsContext=source_namespace,destination_namespace,source_workload,destination_workload
+      - drop:labelsContext=source_namespace,destination_namespace,source_workload,destination_workload
+      - tcp:labelsContext=source_namespace,destination_namespace,source_workload,destination_workload
+      - flow:labelsContext=source_namespace,destination_namespace,source_workload,destination_workload
+    serviceMonitor:
+      enabled: true
+      labels:
+        release: monitoring
+
+prometheus:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: monitoring
+
+operator:
+  # Одной реплики достаточно для небольшого локального kind-кластера.
+  replicas: 1
+  prometheus:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      labels:
+        release: monitoring

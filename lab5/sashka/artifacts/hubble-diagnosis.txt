@@ -1,0 +1,1 @@
+shop/outsider:38992 <> shop/shop-worker-55bd65dc67-b7q58:8081 policy-verdict:none EGRESS DENIED (TCP Flags: SYN)

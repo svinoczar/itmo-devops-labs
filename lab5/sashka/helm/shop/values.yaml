@@ -1,0 +1,99 @@
+global:
+  partOf: shop
+  owner: sashka
+  database:
+    secretName: shop-postgres-app
+    initMode: always
+
+api:
+  replicaCount: 3
+  image:
+    repository: registry.local/shop/api
+    tag: "1.0.1"
+    pullPolicy: IfNotPresent
+  service:
+    type: NodePort
+    port: 8080
+    nodePort: 30080
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  health:
+    path: /health
+  shutdown:
+    drainSeconds: 5
+    gracePeriodSeconds: 30
+  env:
+    HEALTH_FAIL: "false"
+
+worker:
+  replicaCount: 2
+  image:
+    repository: registry.local/shop/worker
+    tag: "1.0.0"
+    pullPolicy: IfNotPresent
+  service:
+    port: 8081
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  health:
+    path: /health
+  shutdown:
+    drainSeconds: 5
+    gracePeriodSeconds: 30
+  env:
+    dbHealthEnabled: "true"
+
+
+postgres:
+  instances: 1
+
+  storage:
+    size: 1Gi
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  bootstrap:
+    database: shop
+    owner: shop
+
+monitoring:
+  enabled: true
+  release: monitoring
+  path: /metrics
+  interval: 15s
+
+networkPolicy:
+  enabled: true
+  # none, dns, postgresSelector, postgresPort или apiSelector.
+  # Остальные значения используются скриптом скрытой поломки из Части 6.
+  fault: none
+  podSubnet: 10.245.0.0/16
+  serviceSubnet: 10.97.0.0/16
+  kubernetesApi:
+    cidr: 10.97.0.1/32
+    port: 443
+    nodeCidr: 172.21.0.0/16
+    nodePort: 6443
+  dns:
+    port: 53
+  client:
+    roleLabel: network-client
+  postgres:
+    port: 5432
+    managerPort: 8000

@@ -1,0 +1,3 @@
+ShopNetworkPolicyDrops	firing	1
+ShopDnsErrors	inactive	0
+ShopTcpResets	inactive	0
