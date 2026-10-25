@@ -1,0 +1,52 @@
+[2026-10-25T14:30:00Z] Starting job 8472910...
+[2026-10-25T14:30:01Z] Cloning repository https://github.com/Sergey-Shikhaylo/containerization-and-orchestration-lab8-mok...
+[2026-10-25T14:30:03Z] Checking out branch main_broken (commit e728efd)...
+[2026-10-25T14:30:05Z] Setting up Go 1.21 environment...
+[2026-10-25T14:30:08Z] Downloading dependencies...
+[2026-10-25T14:30:12Z] Running tests: go test -v ./...
+?       github.com/Sergey-Shikhaylo/containerization-and-orchestration-lab8-mok/cmd/server       [no test files]
+?       github.com/Sergey-Shikhaylo/containerization-and-orchestration-lab8-mok/models           [no test files]
+
+=== RUN   TestTransactionStatus_Success
+2026/10/25 14:30:13 [ERROR] GET /api/v1/transactions/status: missing mandatory query parameter 'tx_id'
+handlers_test.go:24:
+Error Trace:	handlers_test.go:24
+Error:      	Not equal:
+expected: 200
+actual  : 400
+Test:       	TestTransactionStatus_Success
+Messages:   	Expected status 200 OK, got 400 Bad Request. Body: {"error":"missing tx_id"}
+--- FAIL: TestTransactionStatus_Success (0.02s)
+
+=== RUN   TestBillingSync_Created
+2026/10/25 14:30:13 [ERROR] POST /internal/webhook/billing-sync: unauthorized, X-Client-ID header missing
+handlers_test.go:56:
+Error Trace:	handlers_test.go:56
+Error:      	Not equal:
+expected: 201
+actual  : 401
+Test:       	TestBillingSync_Created
+Messages:   	Expected status 201 Created, got 401 Unauthorized. Body: {"error":"unauthorized"}
+--- FAIL: TestBillingSync_Created (0.01s)
+
+=== RUN   TestTransactionRoute_E2E
+2026/10/25 14:30:13 [ERROR] E2E_Test_04 failed on /api/v1/transactions/route
+2026/10/25 14:30:13 [FATAL] panic: runtime error: invalid memory address or nil pointer dereference
+2026/10/25 14:30:13 goroutine 34 [running]:
+2026/10/25 14:30:13 main.ProcessPayment(...)
+2026/10/25 14:30:13 	/app/internal/services/payment.go:42 +0x1a4
+handlers_test.go:89:
+Error Trace:	handlers_test.go:89
+Error:      	Not equal:
+expected: 200
+actual  : 500
+Test:       	TestTransactionRoute_E2E
+Messages:   	Expected status 200 OK, got 500 Internal Server Error.
+--- FAIL: TestTransactionRoute_E2E (0.05s)
+
+FAIL
+FAIL	github.com/Sergey-Shikhaylo/containerization-and-orchestration-lab8-mok/handlers	0.09s
+FAIL
+[2026-10-25T14:30:15Z] exit status 1: FAIL github.com/Sergey-Shikhaylo/containerization-and-orchestration-lab8-mok/handlers [build failed]
+[2026-10-25T14:30:15Z] Job failed. Cleaning up workspace...
+[2026-10-25T14:30:16Z] Uploading artifacts...

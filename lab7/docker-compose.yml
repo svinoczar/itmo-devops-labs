@@ -1,0 +1,93 @@
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n
+    container_name: n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - NODE_OPTIONS=--dns-result-order=ipv4first
+      - N8N_HOST=192.168.31.36
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - N8N_SECURE_COOKIE=false
+      - N8N_METRICS=true
+      - NODE_ENV=production
+      - WEBHOOK_URL=http://192.168.31.36:5678/
+      - N8N_RESTRICT_FILE_ACCESS_TO=/prompts
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./prompts:/prompts
+
+  mcp-filesystem:
+    image: supercorp/supergateway
+    command:
+      - --port
+      - "8002"
+      - --host
+      - 0.0.0.0
+      - --outputTransport
+      - sse
+      - --idle-timeout
+      - "600"
+      - --keep-alive
+      - "10"
+      - --stdio
+      - "npx -y @modelcontextprotocol/server-filesystem /workspace"
+    volumes:
+      - .:/workspace
+    expose:
+      - "8002"
+    restart: unless-stopped
+
+  mcp-git:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp.git
+    command:
+      - --port
+      - "8001"
+      - --host
+      - 0.0.0.0
+      - --outputTransport
+      - sse
+      - --idle-timeout
+      - "600"
+      - --keep-alive
+      - "10"
+      - --stdio
+      - "git config --global --add safe.directory '*' && uvx mcp-server-git --repository /workspace/api"
+    volumes:
+      - .:/workspace
+    expose:
+      - "8001"
+    restart: unless-stopped
+
+  victoriametrics:
+      image: victoriametrics/victoria-metrics:latest
+      ports:
+        - "8428:8428"
+      volumes:
+      - vmdata:/storage
+      - ./prometheus.yml:/prometheus.yml
+      command:
+      - "-storageDataPath=/storage"
+      - "--httpListenAddr=:8428"
+      - "-selfScrapeInterval=10s"
+      - "-promscrape.config=/prometheus.yml"
+      restart: unless-stopped
+
+  grafana:
+      image: grafana/grafana:latest
+      ports:
+        - "3000:3000"
+      volumes:
+        - grafana_data:/var/lib/grafana
+      depends_on:
+        - victoriametrics
+      restart: unless-stopped
+
+volumes:
+  vmdata:
+  grafana_data:
+  n8n_data:

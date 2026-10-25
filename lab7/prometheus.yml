@@ -1,0 +1,6 @@
+scrape_configs:
+  - job_name: 'n8n'
+    scrape_interval: 15s
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['n8n:5678']
