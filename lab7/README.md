@@ -212,3 +212,8 @@ volumes:
 - [Экспорт workflow из n8n](./export_n8n/Workflow.json)
 - [AI skills](./prompts/SKILLs.md)
 - Графики мониторинга есть и выбранные алерты тоже 
+- AI toolkit описан
+
+## И немного жизы, как я писал эту лабу в погоне за пятёркой для команды
+
+<img src="./sources/image-10.png" width="50%" alt=""> 
